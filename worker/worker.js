@@ -1196,6 +1196,11 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * GET /spectral-analysis?title= — Spectral analysis of a paper's p-adic neighborhood.
+     * Computes eigenvalues of the graph Laplacian for the cluster containing the paper,
+     * revealing spectral gaps, connectivity, and diffusion properties.
+     */
     // ─── Tate's Thesis: Multi-Scale Spectral Analysis ───
     // Fourier analysis on the adele ring A_Q simultaneously at all places (∞, 2, 3, 5, ...)
     // The spectral decomposition of the ultrametric tree reveals multi-scale structure
@@ -1256,6 +1261,11 @@ export default {
     }
 
     // ─── Bruhat-Tits Building Representation ───
+    /**
+     * GET /bruhat-tits — Bruhat-Tits building from ultrametric tree.
+     * Apartments are maximal chains in the tree; chambers are top-dimensional simplices.
+     * The type-preserving automorphism group encodes corpus symmetries.
+     */
     if (request.method === "GET" && url.pathname === "/bruhat-tits") {
       try {
         if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
@@ -1286,6 +1296,11 @@ export default {
         }), { headers: hdrs });
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
+    /**
+     * GET /perceptron?inputs=&weights=&p= — p-adic perceptron.
+     * Computes Z_p-weighted dot product with Hensel-lifted weight correction.
+     * Returns activation, p-adic norm, and corrected weights.
+     */
     // ─── A: p-adic Perceptron ───
     if (request.method === "GET" && url.pathname === "/perceptron") {
       try {
@@ -1304,6 +1319,11 @@ export default {
     }
 
     // ─── A: D3 Dendrogram JSON ───
+    /**
+     * GET /dendrogram-json — Tree as D3-compatible JSON dendrogram.
+     * Converts the ultrametric tree into a nested hierarchy with name, children,
+     * and distance properties suitable for D3.js cluster layout visualization.
+     */
     if (request.method === "GET" && url.pathname === "/dendrogram-json") {
       try {
         if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
@@ -1313,6 +1333,11 @@ export default {
     }
 
     // ─── E: Vectorize Ultrametric Index ───
+    /**
+     * POST /vectorize-tree-search — p-adic vector search with ultrametric pruning.
+     * Embeds query, searches Vectorize index, then prunes results using the
+     * ultrametric tree to remove false positives outside the target cluster.
+     */
     if (request.method === "POST" && url.pathname === "/vectorize-tree-search") {
       try {
         if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
@@ -1328,6 +1353,11 @@ export default {
     }
 
     // ─── F: Multi-Edge Hasse Validation ───
+    /**
+     * GET /validate-multi?titles= — Batch Hasse local-global validation.
+     * Validates multiple titles in parallel via /validate, returning per-title
+     * validity results and aggregate statistics.
+     */
     if (request.method === "GET" && url.pathname === "/validate-multi") {
       try {
         const title = (url.searchParams.get("title") || "").trim();
@@ -1346,6 +1376,11 @@ export default {
     }
 
     // ─── G: Witt Vector Diff Engine ───
+    /**
+     * POST /paper-diff — Pairwise ultrametric diff between paper versions.
+     * Computes the ultrametric distance and cluster path between two paper titles,
+     * returning their lowest common ancestor and merge distance.
+     */
     if (request.method === "POST" && url.pathname === "/paper-diff") {
       try {
         const body = await request.json(); const title = (body.title || "").trim(); const content = (body.content || "").trim();
@@ -1364,6 +1399,11 @@ export default {
     }
 
     // ─── H: Berkovich Space Explorer ───
+    /**
+     * GET /berkovich-explorer — Berkovich analytification of the paper corpus.
+     * Maps papers to Type I/II/III/IV points on the Berkovich projective line,
+     * with p-adic valuations and multiplicative seminorms.
+     */
     if (request.method === "GET" && url.pathname === "/berkovich-explorer") {
       try {
         if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
@@ -1381,6 +1421,10 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * GET /stats/csv — Download full query statistics as CSV.
+     * Returns all ask_queries_v2 rows as comma-separated values with headers.
+     */
     if (request.method === "GET" && url.pathname === "/stats/csv") {
       try {
         const c = await env.DB.prepare("SELECT COUNT(*) as total, COALESCE(AVG(elapsed_ms),0) as avg_ms, COALESCE(SUM(citations_count),0) as total_cit FROM ask_queries_v2").first();
@@ -1399,6 +1443,12 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * POST /index-papers — Manual paper indexing (CRON-like).
+     * Actions: "status" (progress), "start" (new batch), "continue" (next batch).
+     * Rate-limited to 10 req/min per IP. Chunks markdown, embeds via bge-base,
+     * upserts to Vectorize index. Maximum 20 papers per batch.
+     */
     // ─── Index papers endpoint ───
     if (request.method === "POST" && url.pathname === "/index-papers") {
       // Rate limiting
@@ -1468,6 +1518,21 @@ export default {
     }
 
     // ─── Main query endpoint ───
+    /**
+     * POST / or POST /query — Main RAG query pipeline.
+     * 1. Embed query via @cf/baai/bge-base-en-v1.5
+     * 2. Search Vectorize index for top-5 matching chunks
+     * 3. Build research context from R2 markdown (D1 fallback for empty chunks)
+     * 4. Assemble system prompt with anti-hallucination guardrails
+     * 5. Query @cf/meta/llama-3.2-3b-instruct (temp=0, top_p=0.1)
+     * 6. Post-process: strip fabricated references, external URLs, in-text citations
+     * 7. Log to D1, update thread, cache result
+     *
+     * @param {string} body.query - The research question
+     * @param {string} [body.thread_id] - Optional thread ID for conversation continuity
+     * @returns {object} answer, citations, thread_id, elapsed_ms, timing breakdown
+     */
+    // ─── Main RAG query pipeline ───
     if (request.method === "POST" && (url.pathname === "/" || url.pathname === "/query")) {
       let query, threadId;
       try {
@@ -1639,6 +1704,18 @@ export default {
       }
     }
 
+    /**
+     * POST /validate-selmer — [Option I] Tate-Shafarevich Group Validation.
+     * Runs full Selmer group verification across all local representations:
+     * D1 (papers table), R2 (storage), cluster (paper_clusters), 
+     * multi-edge (cross-representation consistency).
+     * Performs global lift verification via ostrowski_score.
+     * Stores Selmer generators in D1 selmer_generators table.
+     *
+     * @param {string} body.title - Paper title to validate
+     * @param {string[]} [body.checks] - Which checks to run (d1, r2, cluster, multi-edge)
+     * @returns {object} sha_rank, local_results, global_lift, obstruction_certificate
+     */
     // ─── I: Tate-Shafarevich Group Validation ───
     if (request.method === "POST" && url.pathname === "/validate-selmer") {
       try {
@@ -1697,6 +1774,17 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * POST /p-adic-embed — [Option J] p-Adic Language Model Embedding.
+     * Tokenizes input text → computes p-adic embeddings in Z_p^n via hash→valuation.
+     * Builds binary ultrametric attention mask (no softmax): connected if
+     * |x - y|_p ≤ p^{-2} (ultrametric ball membership).
+     * Connected components = ultrametric clusters.
+     *
+     * @param {string} body.text - Input text to tokenize and embed
+     * @param {number} [body.prime=2] - Prime p for Z_p embedding
+     * @returns {object} tokens, p_adic_embeddings, attention_mask, ultrametric_clusters
+     */
     // ─── J: p-Adic Language Model ───
     if (request.method === "POST" && url.pathname === "/p-adic-embed") {
       try {
@@ -1726,6 +1814,19 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * POST /period-bridge — [Option K] Fontaine Period Bridge API.
+     * Bridges paper representations between R2, D1, and Vectorize via
+     * Fontaine's period rings: B_cris (crystalline), B_st (semistable), B_dR (de Rham).
+     * All 6 bridge directions supported (R2↔D1↔Vectorize).
+     * Stores period matrices in D1 period_matrices table with Frobenius action.
+     *
+     * @param {string} body.source - Source representation: "r2", "d1", or "vectorize"
+     * @param {string} body.target - Target representation: "r2", "d1", or "vectorize"
+     * @param {string} body.paper_id - Paper identifier for lookup
+     * @returns {object} bridge_type, source_representation, target_representation,
+     *                   period_matrix, frobenius_action
+     */
     // ─── K: Fontaine Period Bridge API ───
     if (request.method === "POST" && url.pathname === "/period-bridge") {
       try {
@@ -1777,9 +1878,54 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
-    return new Response(JSON.stringify({ error: "Not found", endpoints: ["GET /health", "GET /thread?id=", "GET /threads", "DELETE /thread?id=", "GET /recent", "GET /stats", "GET /papers", "POST /fix-titles", "POST /", "POST /index-papers", "POST /validate-selmer", "POST /p-adic-embed", "POST /period-bridge"] }), { status: 404, headers: hdrs });
+    /**
+     * GET /spec — OpenAPI 3.1 specification for AI/LLM discoverability.
+     * Returns complete API documentation in OpenAPI format.
+     * Designed for llmstxt.org compatibility.
+     */
+    if (request.method === "GET" && url.pathname === "/spec") {
+      const spec = { openapi: "3.1.0", info: { title: "QWAV Research API", version: "2.7.0", description: "Quantum Wave (QWAV) Research API — p-adic RAG with ultrametric tree search, Tate-Shafarevich validation, p-adic LM embeddings, and Fontaine period bridges. Cloudflare Workers, D1, R2, Vectorize, Llama 3.2.", contact: { name: "QNFO Research", url: "https://qnfo.org" }, "x-topics": ["quantum-computing","p-adic-mathematics","number-theory","information-retrieval"], "x-foundations": ["Ultrametric Tree (single-linkage clustering)","p-Adic LM (Z_p embeddings, ultrametric ball attention)","Tate-Shafarevich (Hasse local-global + Selmer obstruction)","Fontaine Period Bridge (B_cris/B_st/B_dR)","Bruhat-Tits Building","p-Adic Perceptron (Hensel lifting)"] }, servers: [{ url: "https://ask-qwav.q08.workers.dev", description: "QWAV Production" }], paths: {
+        "/health": { get: { summary: "System health check", operationId: "getHealth", tags: ["System"] } },
+        "/thread": { get: { summary: "Get thread messages", operationId: "getThread", tags: ["Threads"], parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }] }, delete: { summary: "Delete thread", operationId: "deleteThread", tags: ["Threads"], parameters: [{ name: "id", in: "query", required: true }] } },
+        "/threads": { get: { summary: "List all threads", operationId: "listThreads", tags: ["Threads"] } },
+        "/recent": { get: { summary: "Recent queries", operationId: "getRecent", tags: ["Analytics"] } },
+        "/did-you-mean": { get: { summary: "Ultrametric spelling correction", operationId: "didYouMean", tags: ["Discovery"], parameters: [{ name: "q", in: "query", required: true }] } },
+        "/ultrametric-tree": { get: { summary: "Tree stats, clusters, HenSel layers", operationId: "ultrametricTree", tags: ["Discovery"] } },
+        "/dendrogram-json": { get: { summary: "D3 dendrogram JSON", operationId: "dendrogramJson", tags: ["Visualization"] } },
+        "/papers": { get: { summary: "Search papers in D1", operationId: "searchPapers", tags: ["Papers"], parameters: [{ name: "search", in: "query" }, { name: "arxiv_id", in: "query" }, { name: "limit", in: "query" }] } },
+        "/fix-titles": { post: { summary: "Batch-correct titles via ultrametric matching", operationId: "fixTitles", tags: ["Papers"] } },
+        "/stats": { get: { summary: "Query statistics", operationId: "getStats", tags: ["Analytics"] } },
+        "/stats/csv": { get: { summary: "Download stats as CSV", operationId: "getStatsCsv", tags: ["Analytics"] } },
+        "/sync-clusters": { post: { summary: "Rebuild tree + persist to R2", operationId: "syncClusters", tags: ["Admin"] } },
+        "/validate": { get: { summary: "Hasse local-global validation", operationId: "validate", tags: ["Validation"], parameters: [{ name: "title", in: "query", required: true }] } },
+        "/validate-multi": { get: { summary: "Batch Hasse validation", operationId: "validateMulti", tags: ["Validation"], parameters: [{ name: "title", in: "query", required: true }] } },
+        "/validate-selmer": { post: { summary: "[I] Tate-Shafarevich Selmer validation", operationId: "validateSelmer", tags: ["Algebraic Geometry"], description: "D1+R2+cluster+multi-edge checks, global lift, Selmer generators → sha_rank + obstruction certificate" } },
+        "/p-adic-embed": { post: { summary: "[J] p-Adic LM embedding", operationId: "pAdicEmbed", tags: ["p-Adic LM"], description: "Token→Z_p embed→ultrametric ball attention mask (no softmax). Connected components = ultrametric clusters." } },
+        "/period-bridge": { post: { summary: "[K] Fontaine Period Bridge", operationId: "periodBridge", tags: ["Algebraic Geometry"], description: "6 bridge directions R2↔D1↔Vectorize via B_cris/B_st/B_dR. Period matrices + Frobenius action." } },
+        "/paper-versions": { get: { summary: "Witt vector version tracking", operationId: "paperVersions", tags: ["Papers"], parameters: [{ name: "title", in: "query", required: true }] } },
+        "/spectral-analysis": { get: { summary: "p-adic spectral analysis", operationId: "spectralAnalysis", tags: ["Discovery"] } },
+        "/bruhat-tits": { get: { summary: "Bruhat-Tits building", operationId: "bruhatTits", tags: ["Geometry"] } },
+        "/perceptron": { get: { summary: "p-adic perceptron", operationId: "perceptron", tags: ["p-Adic ML"], parameters: [{ name: "inputs", in: "query" }, { name: "weights", in: "query" }, { name: "p", in: "query" }] } },
+        "/vectorize-tree-search": { post: { summary: "Vector search with ultrametric pruning", operationId: "vectorizeTreeSearch", tags: ["Search"] } },
+        "/paper-diff": { post: { summary: "Paper diff via ultrametric distance", operationId: "paperDiff", tags: ["Papers"] } },
+        "/berkovich-explorer": { get: { summary: "Berkovich analytification explorer", operationId: "berkovichExplorer", tags: ["Geometry"] } },
+        "/index-papers": { post: { summary: "Manual paper indexing (rate-limited)", operationId: "indexPapers", tags: ["Admin"], description: "Actions: status, start, continue. 10 req/min/IP, max 20 papers/batch." } },
+        "/": { post: { summary: "Main RAG query (alias: /query)", operationId: "ragQuery", tags: ["Query"], description: "Embed→Vectorize→R2 context→Llama 3.2 with anti-hallucination guardrails." } },
+        "/spec": { get: { summary: "This OpenAPI 3.1 spec", operationId: "getSpec", tags: ["Discoverability"], description: "AI crawler discoverability (llmstxt.org compatible)" } }
+      }, tags: [{ name: "System" }, { name: "Threads" }, { name: "Query" }, { name: "Papers" }, { name: "Discovery" }, { name: "Validation" }, { name: "Algebraic Geometry" }, { name: "p-Adic LM" }, { name: "p-Adic ML" }, { name: "Geometry" }, { name: "Search" }, { name: "Visualization" }, { name: "Analytics" }, { name: "Admin" }, { name: "Discoverability" }], "x-ai-crawler": { "llms.txt": "/spec", "robots.txt": "Allow: /", "preferred_format": "openapi-3.1", "search_keywords": ["ultrametric","p-adic","RAG","vector search","Tate-Shafarevich","Fontaine bridge","Bruhat-Tits","Berkovich","Hensel lifting","Witt vectors","dendrogram","Cloudflare Workers"] } };
+      return new Response(JSON.stringify(spec, null, 2), { headers: { ...hdrs, "Content-Type": "application/json" } });
+    }
+
+    return new Response(JSON.stringify({ error: "Not found", endpoints: ["GET /health", "GET /spec", "GET /thread?id=", "GET /threads", "DELETE /thread?id=", "GET /recent", "GET /did-you-mean?q=", "GET /ultrametric-tree", "GET /dendrogram-json", "GET /papers?search=&limit=", "POST /fix-titles", "GET /stats", "GET /stats/csv", "POST /sync-clusters", "GET /validate?title=", "GET /validate-multi?titles=", "POST /validate-selmer", "GET /paper-versions?title=", "GET /spectral-analysis", "GET /bruhat-tits", "GET /perceptron?inputs=&weights=&p=", "POST /vectorize-tree-search", "POST /paper-diff", "GET /berkovich-explorer", "POST /index-papers", "POST /", "POST /query", "POST /p-adic-embed", "POST /period-bridge"] }), { status: 404, headers: hdrs });
   },
 
+  /**
+   * Scheduled handler: auto-indexes papers into Vectorize every 30 minutes.
+   * Processes up to MAX_BATCHES (10) batches per invocation.
+   * Chunks markdown from R2, embeds via @cf/baai/bge-base-en-v1.5,
+   * upserts into VECTORIZE_INDEX with metadata (arxiv_id, title, abstract, url).
+   * Tracks progress in D1 index_progress table for cold-start resilience.
+   */
   // ─── Scheduled handler: auto-index papers every 30 minutes ───
   async scheduled(event, env, ctx) {
     const MAX_BATCHES = 10;
