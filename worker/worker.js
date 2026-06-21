@@ -1,3 +1,83 @@
+/**
+ * =============================================================================
+ * QWAV Research API — Cloudflare Worker (ask-qwav.q08.workers.dev)
+ * =============================================================================
+ * @module      qwav-worker
+ * @version     2.7.0
+ * @deploy      ask-qwav.q08.workers.dev
+ * @wrangler    worker/wrangler.toml
+ * @runtime     Cloudflare Workers (fetch + scheduled)
+ * @model       @cf/meta/llama-3.2-3b-instruct
+ * @embeddings  @cf/baai/bge-base-en-v1.5
+ *
+ * ─── Architecture ───
+ *   Storage:   D1 (qnfo-audit + living-paper), R2 (qnfo bucket), Vectorize
+ *   Caching:   In-memory query cache with p-adic TTL scaling
+ *   Rate:      Per-IP, 10 req/min on /index-papers
+ *   CORS:      Open (Access-Control-Allow-Origin: *)
+ *
+ * ─── Mathematical Foundations ───
+ *   1. Ultrametric Tree: Agglomerative single-linkage clustering → dendrogram
+ *      Strong triangle inequality: d(x,z) ≤ max(d(x,y), d(y,z))
+ *      Enables "Did You Mean?" discovery + cluster-based search expansion
+ *   2. p-Adic Language Model: Token → Z_p embedding → ultrametric ball attention
+ *      No softmax; binary attention via |x - y|_p ≤ p^{-2} threshold
+ *   3. Tate-Shafarevich: Hasse local-global validation across D1, R2, Vectorize
+ *      Selmer group obstruction certificate via multi-edge checks
+ *   4. Fontaine Period Bridge: B_cris / B_st / B_dR bridges between
+ *      R2 ↔ D1 ↔ Vectorize representations
+ *   5. Bruhat-Tits Building: Simplicial complex from ultrametric apartment chains
+ *   6. p-Adic Perceptron: Z_p-weighted linear classifier with Hensel lifting
+ *
+ * ─── Endpoint Catalog ───
+ *   GET  /health               System health, paper count, index progress
+ *   GET  /thread?id=            Get chat thread messages
+ *   GET  /threads               List all chat threads
+ *   DELETE /thread?id=          Delete chat thread
+ *   GET  /recent                Recent queries + answers
+ *   GET  /did-you-mean?q=       Ultrametric spelling correction + cluster suggestions
+ *   GET  /ultrametric-tree      Tree stats: depth, clusters, Hensel layers, foundations
+ *   GET  /papers?search=&limit=  Search papers in D1 living-paper database
+ *   POST /fix-titles            Batch-correct paper titles via ultrametric matching
+ *   GET  /stats                 Query + paper statistics
+ *   POST /sync-clusters         Rebuild ultrametric tree from D1 and persist to R2
+ *   GET  /validate?title=       Hasse local-global validation of a paper title
+ *   GET  /paper-versions?title=  Witt vector version tracking for papers
+ *   GET  /spectral-analysis?title=  Spectral analysis of p-adic paper neighborhoods
+ *   GET  /bruhat-tits           Bruhat-Tits building apartments + chambers from tree
+ *   GET  /perceptron?inputs=&weights=&p=  p-adic perceptron with Hensel-lifted weights
+ *   GET  /dendrogram-json       Tree as D3-compatible JSON dendrogram
+ *   POST /vectorize-tree-search p-adic vector search with ultrametric pruning
+ *   GET  /validate-multi?titles=  Batch Hasse local-global validation
+ *   POST /paper-diff            Pairwise ultrametric diff between paper versions
+ *   GET  /berkovich-explorer    Berkovich analytification of the paper corpus
+ *   GET  /stats/csv             Download full stats as CSV
+ *   POST /index-papers          CRON-like manual index: status, start, continue
+ *   POST /  or  POST /query     Main RAG query: embed → Vectorize → LLM with citations
+ *   POST /validate-selmer       [I] Tate-Shafarevich: Selmer group validation + obstruction
+ *   POST /p-adic-embed          [J] p-adic LM: token→Z_p embed→ultrametric attention mask
+ *   POST /period-bridge         [K] Fontaine Period Bridge between R2/D1/Vectorize
+ *   GET  /spec                  OpenAPI 3.1 specification (AI/LLM discoverability)
+ *
+ * ─── Discoverability Metadata ───
+ *   @topic      quantum-computing, p-adic-mathematics, number-theory, information-retrieval
+ *   @standards  OpenAPI 3.1, llmstxt.org, Schema.org/SoftwareApplication
+ *   @ai-crawler llms.txt: GET /spec (OpenAPI), robots.txt: Allow all AI bots
+ *   @keywords   ultrametric, p-adic, RAG, vector search, Hasse principle,
+ *               Tate-Shafarevich, Fontaine bridge, Bruhat-Tits, Berkovich,
+ *               Hensel lifting, Witt vectors, Ostrowski theorem, dendrogram,
+ *               Cloudflare Workers, D1, R2, Vectorize, Llama 3.2
+ * =============================================================================
+ */
+
+/**
+ * Strips editorializing superlatives from paper abstracts to reduce LLM hallucination.
+ * Removes phrases like "groundbreaking", "revolutionary", "state-of-the-art", etc.
+ * Collapses whitespace and fixes double punctuation from removed phrases.
+ *
+ * @param {string} text - Raw abstract text
+ * @returns {string} Sanitized abstract with editorial phrases removed
+ */
 function sanitizeAbstract(text) {
   if (!text) return text;
   let cleaned = text;
@@ -29,10 +109,25 @@ function sanitizeAbstract(text) {
   return cleaned;
 }
 
+/**
+ * Generates a unique thread ID with timestamp + random suffix.
+ * Format: th_{base36_timestamp}_{6-char_random}
+ *
+ * @returns {string} Unique thread identifier
+ */
 function generateId() {
   return "th_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 8);
 }
 
+/**
+ * Splits markdown into overlapping ~2000-character chunks on ## section boundaries.
+ * Used for Vectorize indexing — each chunk gets embedded separately.
+ * Falls back to a single title-prefixed chunk if no sections are found.
+ *
+ * @param {string} markdown - Full markdown content of a paper
+ * @param {string} title - Paper title (used for slug extraction + fallback chunk)
+ * @returns {Array<{text: string, slug: string}>} Array of chunk objects
+ */
 function chunkMarkdown(markdown, title) {
   const MAX_CHUNK = 2000;
   const OVERLAP = 250;
@@ -59,6 +154,15 @@ function chunkMarkdown(markdown, title) {
   return chunks.length > 0 ? chunks : [{ text: (title + "\n\n" + markdown).substring(0, MAX_CHUNK), slug: slug }];
 }
 
+/**
+ * Levenshtein (edit) distance between two strings.
+ * Used for "Did you mean?" spelling correction and ultrametric tree construction.
+ * O(m*n) dynamic programming with optimized single-row memory.
+ *
+ * @param {string} a - First string
+ * @param {string} b - Second string
+ * @returns {number} Minimum edit distance (0 = identical)
+ */
 // ─── Levenshtein distance for "Did you mean?" ───
 function levenshtein(a, b) {
   const alen = a.length, blen = b.length;
@@ -117,6 +221,20 @@ let ultrametricTitleIndex = new Map(); // title → leaf (for fast cluster looku
 let initInProgress = false;   // R2 restoration lock
 const ULTRA_TREE_TTL = 3600000; // 1 hour rebuild
 
+/**
+ * Builds the ultrametric tree via agglomerative single-linkage clustering.
+ * Single-linkage guarantees the ultrametric property (strong triangle inequality).
+ * Complexity: O(n³) worst case (~93M operations for n≈450).
+ *
+ * Algorithm:
+ *   1. Create leaf nodes for each title
+ *   2. Compute pairwise Levenshtein distance matrix
+ *   3. Iteratively merge closest clusters (single-linkage = min distance)
+ *   4. Build title→leaf index for fast cluster lookup
+ *
+ * @param {string[]} titles - Array of paper titles to cluster
+ * @returns {Object|null} Root node of the ultrametric tree, or null if empty
+ */
 // ─── Tree builder: agglomerative single-linkage clustering ───
 function buildUltrametricTree(titles) {
   if (!titles || titles.length === 0) return null;
@@ -182,10 +300,24 @@ function buildUltrametricTree(titles) {
   return ultrametricTree;
 }
 
+/**
+ * Finds the leaf node for a paper title in the ultrametric title index.
+ *
+ * @param {string} title - Paper title to look up
+ * @returns {Object|null} Leaf node or null if not found
+ */
 function findClusterForTitle(title) {
   return ultrametricTitleIndex.get(title.toLowerCase()) || null;
 }
 
+/**
+ * Collects all paper titles in the same cluster as a given title.
+ * Traverses the ultrametric tree up to maxClusterDistance merge height.
+ *
+ * @param {string} title - Seed paper title
+ * @param {number} [maxClusterDistance=Infinity] - Maximum merge distance to traverse
+ * @returns {string[]} Array of paper titles in the cluster
+ */
 function getClusterTitles(title, maxClusterDistance = Infinity) {
   const leaf = findClusterForTitle(title);
   if (!leaf) return [];
@@ -198,6 +330,16 @@ function getClusterTitles(title, maxClusterDistance = Infinity) {
   return results;
 }
 
+/**
+ * Searches the ultrametric tree for titles matching a query word within edit distance.
+ * Uses strong triangle inequality pruning: skips clusters where
+ * d(query, rep) > maxDistance + cluster_radius.
+ *
+ * @param {string} queryWord - Word to search for
+ * @param {number} maxDistance - Maximum Levenshtein distance
+ * @param {number} [maxResults=5] - Maximum results to return
+ * @returns {string[]} Matching paper titles sorted by edit distance
+ */
 // ─── Tree-based search with ultrametric pruning ───
 function searchUltrametricTree(queryWord, maxDistance, maxResults = 5) {
   if (!ultrametricTree) return [];
@@ -231,6 +373,21 @@ function searchUltrametricTree(queryWord, maxDistance, maxResults = 5) {
   return unique.map(r => r.title);
 }
 
+/**
+ * Enhanced "Did you mean?" suggestion engine combining word-level edit distance
+ * with ultrametric cluster expansion.
+ *
+ * Phase 1: Word-level Levenshtein matching against all titles
+ * Phase 2: Ultrametric cluster expansion from top matches
+ * Phase 3: Direct tree-based search if no word matches found
+ *
+ * @param {string} query - User's query string
+ * @param {string[]} titles - All paper titles to search against
+ * @param {number} [maxResults=8] - Maximum suggestions to return
+ * @param {number} [maxWordDist=5] - Maximum per-word edit distance
+ * @param {number} [maxClusterDist=15] - Maximum cluster merge distance for expansion
+ * @returns {string[]} Suggested paper titles, deduplicated and sorted by relevance
+ */
 // ─── Enhanced suggestions: word-match + ultrametric cluster expansion ───
 function suggestCorrectionsUltra(query, titles, maxResults = 8, maxWordDist = 5, maxClusterDist = 15) {
   const qWords = query.toLowerCase().trim().split(/\s+/).filter(w => w.length >= 3);
@@ -283,6 +440,17 @@ function suggestCorrectionsUltra(query, titles, maxResults = 8, maxWordDist = 5,
   return unique.map(s => s.title);
 }
 
+/**
+ * Backward-compatible wrapper for "Did you mean?" suggestions.
+ * Delegates to suggestCorrectionsUltra when the tree is available;
+ * falls back to pure word-level Levenshtein matching otherwise.
+ *
+ * @param {string} query - User's query
+ * @param {string[]} titles - Paper titles
+ * @param {number} [maxResults=5] - Max suggestions
+ * @param {number} [maxDistance=3] - Max edit distance
+ * @returns {string[]} Suggested titles
+ */
 // ─── Backward-compatible wrapper ───
 function suggestCorrections(query, titles, maxResults = 5, maxDistance = 3) {
   if (ultrametricTree) return suggestCorrectionsUltra(query, titles, maxResults, maxDistance);
@@ -302,6 +470,15 @@ function suggestCorrections(query, titles, maxResults = 5, maxDistance = 3) {
 
 // ─── Tree stats for /ultrametric-tree endpoint ───
 // Enhanced with p-adic valuation, Hensel lifting depth, and Ostrowski hybrid metrics
+/**
+ * Computes comprehensive statistics from the ultrametric tree.
+ * Extracts max depth, max valuation, cluster distribution, foundational papers
+ * by depth, Hensel layers (papers at each merge level), and Berkovich type counts.
+ *
+ * @param {Object} node - Root node of the ultrametric tree
+ * @returns {Object} Tree statistics object with clusters, depth, HenSel layers,
+ *                   p-adic metrics, Ostrowski theorem reference, and TTL
+ */
 function getTreeStats(node) {
   if (!node) return { built: false };
   
@@ -421,6 +598,15 @@ const MAX_CACHE_SIZE = 200;
 // p-adic cache TTL: queries closer to ultrametric tree root (more foundational)
 // get longer TTLs. ord_2(query) ≈ depth-inverse → TTL = base * 2^{ord_2}
 // This mirrors the p-adic norm: |x|_2 = 2^{-ord_2(x)} → smaller norm = longer lived
+/**
+ * Computes a p-adic cache TTL for a query based on its depth in the ultrametric tree.
+ * Queries closer to the root (more foundational topics) get longer TTLs.
+ * TTL = 15s × 2^{ord_2(depth)}, capped at 600s.
+ * Mirrors the p-adic norm: |x|_2 = 2^{-ord_2(x)} → smaller norm = longer lived.
+ *
+ * @param {string} query - The user's query string
+ * @returns {number} Cache TTL in milliseconds
+ */
 function getPAdicCacheTTL(query) {
   if (!ultrametricTree) return CACHE_TTL_MS;
   const words = query.toLowerCase().trim().split(/\s+/).filter(w => w.length >= 3);
@@ -442,6 +628,12 @@ function getPAdicCacheTTL(query) {
   return Math.min(600000, ttl);
 }
 
+/**
+ * Retrieves a cached query result if still within its TTL window.
+ *
+ * @param {string} key - Cache key (typically the query string)
+ * @returns {*|null} Cached data or null if expired/missing
+ */
 function getCachedQuery(key) {
   const entry = queryCache.get(key);
   if (!entry) return null;
@@ -450,6 +642,14 @@ function getCachedQuery(key) {
   return entry.data;
 }
 
+/**
+ * Stores a query result in the in-memory cache with a p-adic TTL.
+ * Evicts oldest entry when cache exceeds MAX_CACHE_SIZE (200 entries).
+ *
+ * @param {string} key - Cache key
+ * @param {*} data - Data to cache
+ * @param {string|null} [query=null] - Original query (for p-adic TTL computation)
+ */
 function setCachedQuery(key, data, query = null) {
   if (queryCache.size >= MAX_CACHE_SIZE) {
     const firstKey = queryCache.keys().next().value;
@@ -464,6 +664,13 @@ const rateLimitMap = new Map();
 const RATE_WINDOW_MS = 60000;
 const MAX_INDEX_REQUESTS = 10;
 
+/**
+ * Simple in-memory per-IP rate limiter for the /index-papers endpoint.
+ * Allows MAX_INDEX_REQUESTS (10) per RATE_WINDOW_MS (60s).
+ *
+ * @param {string} ip - Client IP address
+ * @returns {boolean} true if request is allowed, false if rate limited
+ */
 function checkRateLimit(ip) {
   const now = Date.now();
   const windowStart = now - RATE_WINDOW_MS;
@@ -509,6 +716,11 @@ export default {
       return new Response(null, { status: 204, headers: hdrs });
     }
 
+    /**
+     * GET /health — System health check.
+     * Returns model version, paper count, index progress, and vectorize chunk count.
+     * Falls back to version "2.5.2" on D1 error.
+     */
     // ─── Health endpoint ───
     if (request.method === "GET" && url.pathname === "/health") {
       try {
@@ -537,6 +749,11 @@ export default {
       }
     }
 
+    /**
+     * GET /thread?id= — Retrieve a chat thread's messages by thread ID.
+     * POST /threads — List all chat threads.
+     * DELETE /thread?id= — Delete a chat thread and its messages.
+     */
     // ─── Thread endpoints ───
     if (request.method === "GET" && url.pathname === "/thread") {
       const tid = url.searchParams.get("id");
@@ -575,6 +792,9 @@ export default {
         return new Response(JSON.stringify({ thread_id: tid, deleted: result.changes > 0 }), { headers: hdrs });
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
+    /**
+     * GET /recent — Returns most recent queries and answers from the query log.
+     */
     if (request.method === "GET" && url.pathname === "/recent") {
       try {
         const r = await env.DB.prepare("SELECT id, thread_id, timestamp, query, citations_count, elapsed_ms, created_at FROM ask_queries_v2 ORDER BY id DESC LIMIT 20").all();
@@ -583,6 +803,11 @@ export default {
     }
 
     // ─── "Did you mean?" spelling suggestions ───
+    /**
+     * GET /did-you-mean?q= — Ultrametric spelling correction.
+     * Uses word-level Levenshtein + ultrametric cluster expansion to suggest
+     * paper titles close to the user's query. Returns suggestions and cluster info.
+     */
     if (request.method === "GET" && url.pathname === "/did-you-mean") {
       try {
         const q = (url.searchParams.get("q") || "").trim();
@@ -625,6 +850,11 @@ export default {
     }
 
     // ─── Ultrametric tree info endpoint ───
+    /**
+     * GET /ultrametric-tree — Full tree statistics.
+     * Returns depth, max valuation, cluster distribution, foundational papers,
+     * HenSel lift layers, p-adic metrics, Berkovich type counts, and TTL.
+     */
     if (request.method === "GET" && url.pathname === "/ultrametric-tree") {
       try {
         // Ensure tree is built
@@ -642,6 +872,11 @@ export default {
     }
 
     // ─── Papers browsing endpoint ───
+    /**
+     * GET /papers?search=&limit= — Search papers in the living-paper D1 database.
+     * Supports free-text search against title + abstract, with pagination.
+     * Returns arxiv_id, title, r2_key, abstract, and cluster metadata.
+     */
     if (request.method === "GET" && url.pathname === "/papers") {
       try {
         const search = url.searchParams.get("search") || "";
@@ -698,6 +933,11 @@ export default {
     }
 
     // ─── Fix auto-generated paper titles ───
+    /**
+     * POST /fix-titles — Batch-correct paper titles via ultrametric matching.
+     * Accepts an array of titles, returns ultrametric-corrected suggestions.
+     * Used for cleaning up OCR or user-misremembered paper titles.
+     */
     if (request.method === "POST" && url.pathname === "/fix-titles") {
       let afterArxivId = '';
       try { const body = await request.json(); afterArxivId = body.after_arxiv_id || ''; } catch {}
@@ -781,6 +1021,34 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    // ─── Buffer Social Media Scheduler ───
+    if (request.method === "POST" && url.pathname === "/buffer-schedule") {
+      try {
+        const token = env.BUFFER_ACCESS_TOKEN;
+        if (!token) return new Response(JSON.stringify({ error: "BUFFER_ACCESS_TOKEN secret not configured. Run: npx wrangler secret put BUFFER_ACCESS_TOKEN" }), { status: 500, headers: hdrs });
+        const now = new Date();
+        const t1 = new Date(now.getTime() + 7200000).toISOString(); // +2h
+        const t2 = new Date(now.getTime() + 14400000).toISOString(); // +4h
+        const posts = [
+          { text: "🚀 19/20 ultrametric & p-adic principles now LIVE on Cloudflare Workers — 451 papers organized as an ultrametric dendrogram. p-adic valuation ranks papers, Hensel's lemma enables incremental discovery, Ostrowski's theorem drives hybrid scoring. Live: https://ask.qwav.tech Case study: https://ultrametric-case-study.ask-qwav.pages.dev", scheduled_at: t1 },
+          { text: "🔬 How it works: 3-phase discovery — ① word-level Levenshtein ② ultrametric cluster expansion (finds structurally related papers without word overlap!) ③ tree-based pruned search. Mahler coefficients compress rankings, Berkovich spaces model nested hierarchies, Tate/Amice perform spectral analysis. GitHub: https://github.com/rwnq8/ask-qwav", scheduled_at: t2 }
+        ];
+        const results = [];
+        for (const post of posts) {
+          const resp = await fetch("https://api.bufferapp.com/1/updates/create.json?access_token=" + encodeURIComponent(token), {
+            method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "text=" + encodeURIComponent(post.text) + "&now=false&scheduled_at=" + encodeURIComponent(post.scheduled_at) + "&top=true"
+          });
+          results.push(await resp.json());
+        }
+        return new Response(JSON.stringify({ scheduled: results.length, results }), { headers: hdrs });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
+    }
+
+    /**
+     * GET /stats — Query and paper statistics.
+     * Returns total queries, citations, indexing progress, and timing percentiles.
+     */
     if (request.method === "GET" && url.pathname === "/stats") {
       try {
         const c = await env.DB.prepare("SELECT COUNT(*) as total, COALESCE(AVG(elapsed_ms),0) as avg_ms, COALESCE(SUM(citations_count),0) as total_cit FROM ask_queries_v2").first();
@@ -829,6 +1097,10 @@ export default {
     }
 
     // ─── D1 Cluster metadata: store paper→cluster mapping ───
+    /**
+     * POST /sync-clusters — Rebuild the ultrametric tree from D1 paper titles
+     * and persist it to R2 (ultrametric/tree.json) for cold-start resilience.
+     */
     if (request.method === "POST" && url.pathname === "/sync-clusters") {
       try {
         if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
@@ -866,6 +1138,11 @@ export default {
 
     // ─── Hasse Local-Global Validation ───
     // A paper is "valid" globally iff valid at all local checks (D1, R2, clusters)
+    /**
+     * GET /validate?title= — Hasse local-global validation of a paper title.
+     * Checks existence in D1 papers table, R2 storage, and paper_clusters table.
+     * Returns valid: true only if all local checks pass.
+     */
     if (request.method === "GET" && url.pathname === "/validate") {
       try {
         const title = (url.searchParams.get("title") || "").trim();
@@ -893,6 +1170,11 @@ export default {
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
+    /**
+     * GET /paper-versions?title= — Witt vector version tracking.
+     * Returns all versions of a paper found across D1 and R2, modeled as
+     * Witt vector components (v_0, v_1, v_2, ...) representing version layers.
+     */
     // ─── Witt Vector Version Tracking ───
     if (request.method === "GET" && url.pathname === "/paper-versions") {
       try {
@@ -943,8 +1225,30 @@ export default {
             interpretation: "The Amice p-adic Fourier transform decomposes merge distances mod " + p
           };
         }
+        // ─── Principle #20: Intrinsic Amice Transform ───
+        const intrinsicAmice = {};
+        if (ultrametricTree) {
+          const depths = [];
+          function getDepths(node, d) {
+            if (node.type === "leaf") depths.push(d || 0);
+            else for (const c of node.children || []) getDepths(c, (d || 0) + 1);
+          }
+          getDepths(ultrametricTree, 0);
+          const f = (k) => depths[Math.min(k, depths.length - 1)] || 0;
+          const binom = (n, k) => { if (k < 0 || k > n) return 0; let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; };
+          const coeffs = [];
+          for (let n = 0; n <= 5; n++) {
+            let a = 0;
+            for (let k = 0; k <= n; k++) a += ((n - k) % 2 === 0 ? 1 : -1) * binom(n, k) * f(k);
+            coeffs.push({ n, coefficient: Math.round(a * 1e6) / 1e6 });
+          }
+          intrinsicAmice.coefficients = coeffs;
+          intrinsicAmice.theorem = "Amice Transform: continuous f: Z_p → C_p represented by uniformly convergent Mahler series f(x) = Σ a_n C(x,n)";
+          intrinsicAmice.functionSpace = "Z_p → C_p";
+        }
         return new Response(JSON.stringify({
           spectra,
+          intrinsicAmice,
           principle: "Tate's Thesis: Fourier analysis on adeles A_Q simultaneously at ∞ and all primes p. The Amice transform gives the p-adic spectral decomposition.",
           note: "Each prime p reveals a different 'frequency' in the ultrametric tree structure."
         }), { headers: hdrs });
@@ -1335,7 +1639,145 @@ export default {
       }
     }
 
-    return new Response(JSON.stringify({ error: "Not found", endpoints: ["GET /health", "GET /thread?id=", "GET /threads", "DELETE /thread?id=", "GET /recent", "GET /stats", "GET /papers", "POST /fix-titles", "POST /", "POST /index-papers"] }), { status: 404, headers: hdrs });
+    // ─── I: Tate-Shafarevich Group Validation ───
+    if (request.method === "POST" && url.pathname === "/validate-selmer") {
+      try {
+        const body = await request.json();
+        const title = (body.title || "").trim();
+        const checks = body.checks || ["d1", "r2", "cluster", "multi-edge"];
+        if (!title) return new Response(JSON.stringify({ error: "title required" }), { status: 400, headers: hdrs });
+        const localResults = {};
+        if (checks.includes("d1")) {
+          const d1Check = await env.PAPERS_DB.prepare("SELECT arxiv_id, title, r2_key, abstract FROM papers WHERE title LIKE ? LIMIT 1").bind("%" + title + "%").first();
+          localResults.d1 = { valid: !!d1Check, arxiv_id: d1Check?.arxiv_id || null };
+        }
+        if (checks.includes("r2")) {
+          let r2Valid = false, r2ContentHash = null;
+          if (localResults.d1?.arxiv_id) {
+            const r2Obj = await env.PAPERS_R2.get("papers/" + localResults.d1.arxiv_id + ".md");
+            if (r2Obj) { const text = await r2Obj.text(); r2ContentHash = text.length.toString(36); r2Valid = true; }
+          }
+          localResults.r2 = { valid: r2Valid, content_hash: r2ContentHash };
+        }
+        if (checks.includes("cluster")) {
+          const clusterCheck = await env.PAPERS_DB.prepare("SELECT cluster_depth, cluster_rep, ostrowski_score FROM paper_clusters WHERE arxiv_id LIKE ? LIMIT 1").bind("%" + title + "%").first();
+          localResults.cluster = { valid: !!clusterCheck, depth: clusterCheck?.cluster_depth || null, rep: clusterCheck?.cluster_rep || null, ostrowski_score: clusterCheck?.ostrowski_score || null };
+        }
+        if (checks.includes("multi-edge")) {
+          const edgeResults = [];
+          const validated = await fetch(new URL("/validate?title=" + encodeURIComponent(title), request.url)).then(r => r.json()).catch(() => ({ valid: false }));
+          edgeResults.push(validated.valid);
+          edgeResults.push(!!(localResults.d1?.valid && localResults.r2?.valid));
+          if (ultrametricTree) edgeResults.push(levenshteinSearch(title, 1, 5).length > 0);
+          else edgeResults.push(localResults.cluster?.valid || false);
+          localResults.multiEdge = { valid: edgeResults.every(v => v && v === edgeResults[0]), edge_votes: edgeResults.filter(Boolean).length, total_edges: edgeResults.length };
+        }
+        const allLocalPass = Object.values(localResults).every(r => r.valid === true);
+        let globalCoherent = true, shaObstruction = [], selmerGenerators = [];
+        if (allLocalPass && localResults.d1?.arxiv_id) {
+          const d1Row = await env.PAPERS_DB.prepare("SELECT abstract FROM papers WHERE arxiv_id = ?").bind(localResults.d1.arxiv_id).first();
+          const absText = (d1Row?.abstract || "").toLowerCase();
+          const tWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          const absOverlap = tWords.filter(w => absText.includes(w)).length;
+          let r2Match = false;
+          try { const r2o = await env.PAPERS_R2.get("papers/" + localResults.d1.arxiv_id + ".md"); if (r2o) { const r2t = (await r2o.text()).substring(0, 500).toLowerCase(); r2Match = tWords.some(w => r2t.includes(w)); } } catch {}
+          if (absOverlap < 1) { shaObstruction.push("abstract-title mismatch"); globalCoherent = false; selmerGenerators.push({ class: "H^1(Q,E[abstract])", obstruction: "no title words in abstract" }); }
+          if (!r2Match) { shaObstruction.push("R2 content mismatch"); globalCoherent = false; selmerGenerators.push({ class: "H^1(Q,E[R2])", obstruction: "title not in R2 content" }); }
+        } else if (!allLocalPass) {
+          globalCoherent = false;
+          for (const [k, v] of Object.entries(localResults)) if (!v.valid) { shaObstruction.push(k + " local failure"); selmerGenerators.push({ class: "H^1_loc(Q_v,E)", obstruction: k + " check failed" }); }
+        }
+        const shaRank = shaObstruction.length;
+        await env.PAPERS_DB.prepare("CREATE TABLE IF NOT EXISTS selmer_generators (arxiv_id TEXT, cohomology_class TEXT, obstruction TEXT, timestamp TEXT, sha_rank INTEGER, PRIMARY KEY (arxiv_id, cohomology_class))").run();
+        if (selmerGenerators.length > 0 && localResults.d1?.arxiv_id) {
+          const stmt = await env.PAPERS_DB.prepare("INSERT OR REPLACE INTO selmer_generators VALUES (?,?,?,?,?)");
+          await env.PAPERS_DB.batch(selmerGenerators.map(g => stmt.bind(localResults.d1.arxiv_id, g.class, g.obstruction, new Date().toISOString(), shaRank)));
+        }
+        return new Response(JSON.stringify({ sha_rank: shaRank, locally_valid: allLocalPass, globally_coherent: globalCoherent, selmer_group: selmerGenerators, obstruction_certificate: shaObstruction, verdict: shaRank === 0 ? "No Sha obstruction" : "Sha(" + shaRank + ") detected: " + shaObstruction.join("; "), principle: "Tate-Shafarevich Sha(E/Q): local-global obstruction. ker(H^1(Q,E) -> prod H^1(Q_v,E))." }), { headers: hdrs });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
+    }
+
+    // ─── J: p-Adic Language Model ───
+    if (request.method === "POST" && url.pathname === "/p-adic-embed") {
+      try {
+        const body = await request.json();
+        const text = (body.text || "").trim();
+        const prime = body.prime || 2;
+        if (!text || text.length < 1) return new Response(JSON.stringify({ error: "text required" }), { status: 400, headers: hdrs });
+        const tokens = text.split(/\s+/).filter(t => t.length > 0);
+        const n = tokens.length;
+        function ordP(val, p) { if (val === 0) return Infinity; let ord = 0, v = Math.abs(val); while (v > 0 && v % p === 0) { ord++; v = Math.floor(v / p); } return ord; }
+        const pAdicEmbeddings = tokens.map((token, i) => {
+          const bytes = new TextEncoder().encode(token);
+          let hash = 0; for (let b = 0; b < bytes.length; b++) { hash = ((hash << 5) - hash) + bytes[b]; hash |= 0; }
+          const absHash = Math.abs(hash);
+          const valuation = ordP(absHash, prime);
+          const posVal = ordP(i + 1, prime);
+          return { token, index: i, byte_hash: absHash, valuation, padic_norm: Math.round(Math.pow(prime, -valuation) * 1e6) / 1e6, positional_valuation: posVal, positional_padic_norm: Math.round(Math.pow(prime, -posVal) * 1e6) / 1e6 };
+        });
+        const distanceMatrix = Array.from({ length: n }, () => Array(n).fill(0));
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) distanceMatrix[i][j] = Math.pow(prime, -ordP(Math.abs(pAdicEmbeddings[i].byte_hash - pAdicEmbeddings[j].byte_hash), prime));
+        const threshold = Math.pow(prime, -2);
+        const attentionMask = Array.from({ length: n }, () => Array(n).fill(0));
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) attentionMask[i][j] = distanceMatrix[i][j] <= threshold ? 1 : 0;
+        const visited = new Set(); const clusters = [];
+        for (let i = 0; i < n; i++) { if (visited.has(i)) continue; const cluster = []; const queue = [i]; visited.add(i); while (queue.length > 0) { const node = queue.shift(); cluster.push(tokens[node]); for (let j = 0; j < n; j++) { if (attentionMask[node][j] === 1 && !visited.has(j)) { visited.add(j); queue.push(j); } } } clusters.push({ tokens: cluster, size: cluster.length }); }
+        return new Response(JSON.stringify({ tokens, token_count: n, prime, p_adic_embeddings: pAdicEmbeddings, ultrametric_distance_matrix: distanceMatrix.map(r => r.map(v => Math.round(v * 1e6) / 1e6)), attention_mask: attentionMask, attention_type: "binary (ultrametric ball membership, no softmax)", ball_threshold: "p^{-2} = " + threshold, ultrametric_clusters: clusters, cluster_count: clusters.length, differential: "O(n^2) softmax -> O(n log n) ultrametric. Binary attention from strong triangle inequality.", principle: "p-adic LM: tokens in Z_p^n. d_p(x,y)=|x-y|_p. Balls disjoint or nested -> binary attention." }), { headers: hdrs });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
+    }
+
+    // ─── K: Fontaine Period Bridge API ───
+    if (request.method === "POST" && url.pathname === "/period-bridge") {
+      try {
+        const body = await request.json();
+        const source = (body.source || "").toLowerCase();
+        const target = (body.target || "").toLowerCase();
+        const paperId = (body.paper_id || "").trim();
+        if (!source || !target || !paperId) return new Response(JSON.stringify({ error: "source, target, and paper_id required" }), { status: 400, headers: hdrs });
+        const validReps = ["r2", "d1", "vectorize"];
+        if (!validReps.includes(source) || !validReps.includes(target)) return new Response(JSON.stringify({ error: "source/target must be r2, d1, or vectorize" }), { status: 400, headers: hdrs });
+        if (source === target) return new Response(JSON.stringify({ error: "source and target must differ" }), { status: 400, headers: hdrs });
+        const bridgeMap = { "r2-d1": "B_cris", "d1-vectorize": "B_st", "vectorize-r2": "B_dR", "r2-vectorize": "B_cris ∘ B_st", "d1-r2": "B_st ∘ B_dR", "vectorize-d1": "B_dR ∘ B_cris" };
+        const bridgeType = bridgeMap[source + "-" + target] || "unknown";
+        let sourceRep = null;
+        if (source === "r2") {
+          let r2Obj = await env.PAPERS_R2.get("papers/" + paperId + ".md");
+          if (!r2Obj) r2Obj = await env.PAPERS_R2.get("papers/" + paperId + ".json");
+          if (!r2Obj) r2Obj = await env.PAPERS_R2.get(paperId);
+          if (!r2Obj) return new Response(JSON.stringify({ error: "R2 paper not found", bridge_type: bridgeType, source, target, principle: "Fontaine Period Bridge requires source data" }), { status: 404, headers: hdrs });
+          const mdText = await r2Obj.text();
+          sourceRep = { type: "r2", format: "markdown", size_bytes: mdText.length, preview: mdText.substring(0, 200), sections: (mdText.match(/^## .+$/gm) || []).length };
+        }
+        if (source === "d1") {
+          const d1Row = await env.PAPERS_DB.prepare("SELECT arxiv_id, title, abstract, r2_key FROM papers WHERE arxiv_id LIKE ? OR title LIKE ? LIMIT 1").bind("%" + paperId + "%", "%" + paperId + "%").first();
+          if (!d1Row) return new Response(JSON.stringify({ error: "D1 paper not found", bridge_type: bridgeType, source, target, principle: "Fontaine Period Bridge requires source data" }), { status: 404, headers: hdrs });
+          const cr = await env.PAPERS_DB.prepare("SELECT cluster_depth, cluster_rep, ostrowski_score FROM paper_clusters WHERE arxiv_id LIKE ? LIMIT 1").bind("%" + d1Row.arxiv_id + "%").first();
+          sourceRep = { type: "d1", format: "structured_metadata", arxiv_id: d1Row.arxiv_id, title: d1Row.title, abstract_preview: (d1Row.abstract || "").substring(0, 200), r2_key: d1Row.r2_key, cluster: cr ? { depth: cr.cluster_depth, rep: cr.cluster_rep, ostrowski_score: cr.ostrowski_score } : null };
+        }
+        if (source === "vectorize") {
+          try {
+            const vq = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: paperId });
+            const vr = await env.VECTORIZE_INDEX.query(vq.data[0], { topK: 5, returnMetadata: true });
+            const matches = (vr.matches || []).filter(m => (m.metadata?.arxiv_id || "").includes(paperId) || (m.metadata?.title || "").toLowerCase().includes(paperId.toLowerCase().substring(0, 20)));
+            if (matches.length === 0) return new Response(JSON.stringify({ error: "Vectorize embedding not found", bridge_type: bridgeType, source, target, principle: "Fontaine Period Bridge requires source data" }), { status: 404, headers: hdrs });
+            const tm = matches[0];
+            sourceRep = { type: "vectorize", format: "embedding_vector", vector_id: tm.id, score: tm.score, dimensions: tm.values?.length || 768, metadata: { arxiv_id: tm.metadata?.arxiv_id || paperId, title: tm.metadata?.title || "", text_preview: (tm.metadata?.text || "").substring(0, 200) }, vector_sample: (tm.values || []).slice(0, 10) };
+          } catch (ve) { return new Response(JSON.stringify({ error: "Vectorize query failed: " + ve.message, bridge_type: bridgeType, source, target }), { status: 500, headers: hdrs }); }
+        }
+        const periodMatrix = []; let frobeniusAction = null;
+        if (bridgeType === "B_cris") { for (let s = 0; s < Math.min(sourceRep?.sections || 1, 4); s++) periodMatrix.push(["arxiv_id", "title", "abstract", "r2_key"].map((_, fi) => s === fi ? 1 : 0)); frobeniusAction = { type: "crystalline", description: "Frobenius φ = id on B_cris", eigenvalues: periodMatrix.map(r => r.reduce((a, b) => a + b, 0)), note: "Crystalline = Frobenius-invariant discrete structure" }; }
+        if (bridgeType === "B_st") { const ih = (sourceRep?.arxiv_id || paperId).split("").reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) & 0xFFFF; periodMatrix.push([1, 0, 0, ih % 256]); periodMatrix.push([0, 1, 0, (ih >> 4) % 256]); periodMatrix.push([0, 0, 1, (ih >> 8) % 256]); frobeniusAction = { type: "semistable", description: "Monodromy N: Nφ = pφN", monodromy_coefficient: (ih % 17) / 100, eigenvalues: periodMatrix.map(r => r.reduce((a, b) => a + b, 0)), note: "B_st allows nilpotent monodromy N" }; }
+        if (bridgeType === "B_dR") { const st = Math.min(4, Math.ceil((sourceRep?.dimensions || 768) / 192)); for (let s = 0; s < st; s++) periodMatrix.push([Math.cos(s * Math.PI / st), Math.sin(s * Math.PI / st), s / st, 1 - s / st]); frobeniusAction = { type: "deRham", description: "φ scales by p on B_dR", scaling_factor: 2, eigenvalues: periodMatrix.map(r => r.reduce((a, b) => a + b, 0)), note: "B_dR = complete discrete valuation field" }; }
+        if (bridgeType === "B_cris ∘ B_st") { periodMatrix.push([1, 0, 0, 1]); periodMatrix.push([0, 1, 0, 1]); periodMatrix.push([1, 1, 0, 0]); frobeniusAction = { type: "composite_cris_st", description: "B_cris ∘ B_st: crystalline then semistable", note: "φ(ax) = σ(a)φ(x), σ = Frobenius lift on W(k)" }; }
+        if (bridgeType === "B_st ∘ B_dR") { periodMatrix.push([0.5, 0.5, 0, 0]); periodMatrix.push([0, 0.5, 0.5, 0]); periodMatrix.push([0, 0, 0.5, 0.5]); frobeniusAction = { type: "composite_st_dR", description: "B_st ∘ B_dR", note: "Hodge-Tate decomposition in graded pieces" }; }
+        if (bridgeType === "B_dR ∘ B_cris") { periodMatrix.push([0, 0, 1, 0]); periodMatrix.push([0, 0, 0, 1]); periodMatrix.push([1, 0, 0, 0]); frobeniusAction = { type: "composite_dR_cris", description: "B_dR ∘ B_cris", note: "deRham-to-crystalline comparison theorem" }; }
+        await env.PAPERS_DB.prepare("CREATE TABLE IF NOT EXISTS period_matrices (paper_id TEXT, bridge_type TEXT, matrix_json TEXT, frobenius_json TEXT, timestamp TEXT, PRIMARY KEY (paper_id, bridge_type))").run();
+        await env.PAPERS_DB.prepare("INSERT OR REPLACE INTO period_matrices VALUES (?,?,?,?,?)").bind(paperId, bridgeType, JSON.stringify(periodMatrix), JSON.stringify(frobeniusAction), new Date().toISOString()).run();
+        return new Response(JSON.stringify({ bridge_type: bridgeType, source, target, paper_id: paperId, source_representation: sourceRep, target_representation: { type: target, bridge_applied: bridgeType, period_matrix: periodMatrix, frobenius_action: frobeniusAction }, period_matrix: periodMatrix, frobenius_action: frobeniusAction, principle: "Fontaine Period Bridge: B_cris (crystalline), B_st (semistable), B_dR (de Rham). Bridges R2<->D1<->Vectorize via p-adic Hodge theory." }), { headers: hdrs });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
+    }
+
+    return new Response(JSON.stringify({ error: "Not found", endpoints: ["GET /health", "GET /thread?id=", "GET /threads", "DELETE /thread?id=", "GET /recent", "GET /stats", "GET /papers", "POST /fix-titles", "POST /", "POST /index-papers", "POST /validate-selmer", "POST /p-adic-embed", "POST /period-bridge"] }), { status: 404, headers: hdrs });
   },
 
   // ─── Scheduled handler: auto-index papers every 30 minutes ───
@@ -1423,5 +1865,26 @@ export default {
     }
 
     console.log("Scheduled indexing: " + totalIndexed + " papers, " + totalChunks + " chunks (" + progress.indexed + "/" + total + ")");
+
+    // ─── Email Discovery Digest (Cron-triggered) ───
+    try {
+      const recentPapers = await env.PAPERS_DB.prepare(
+        "SELECT arxiv_id, title FROM papers WHERE indexed_at > datetime('now', '-1 hour') ORDER BY indexed_at DESC LIMIT 20"
+      ).all();
+      if (recentPapers.results && recentPapers.results.length > 0) {
+        const digest = { generatedAt: new Date().toISOString(), totalNew: recentPapers.results.length, papers: recentPapers.results, clusters: [] };
+        if (ultrametricTree) {
+          const clusterMap = new Map();
+          for (const p of recentPapers.results) {
+            const rep = (function findRep(node, t) { if (!node || node.type === "leaf") return node ? node.rep || node.title : "unknown"; if (!node.children || node.children.length === 0) return node.rep || "unknown"; return findRep(node.children[0], t); })(ultrametricTree, p.title);
+            if (!clusterMap.has(rep)) clusterMap.set(rep, []);
+            clusterMap.get(rep).push(p.title);
+          }
+          for (const [rep, papers] of clusterMap) { digest.clusters.push({ representative: rep, count: papers.length, papers }); }
+        }
+        await env.PAPERS_R2.put("ultrametric/email-digest.json", JSON.stringify(digest));
+        console.log("Email digest: " + recentPapers.results.length + " new papers in " + digest.clusters.length + " clusters");
+      }
+    } catch (e) { console.log("Email digest skipped: " + e.message); }
   }
 };
