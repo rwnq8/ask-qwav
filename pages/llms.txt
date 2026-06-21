@@ -1,0 +1,41 @@
+# Ask QWAV — Ultrametric Research Oracle
+> Production search engine applying 20 ultrametric & p-adic mathematical principles to information retrieval on Cloudflare Workers.
+
+## Core URLs
+- Live system: https://ask.qwav.tech (or https://655678fa.ask-qwav.pages.dev)
+- Case study: https://ultrametric-case-study.ask-qwav.pages.dev
+- API (Worker): https://ask-qwav.q08.workers.dev
+- API spec: https://ask-qwav.q08.workers.dev/spec (OpenAPI 3.1)
+- Health: https://ask-qwav.q08.workers.dev/health
+- GitHub: https://github.com/rwnq8/ask-qwav
+
+## What It Does
+Ask QWAV is a "Did You Mean?" discovery engine for 454 academic papers using:
+1. Ultrametric distance (strong triangle inequality) via single-linkage clustering
+2. p-adic valuation for ranking papers
+3. Ostrowski's theorem for hybrid metric scoring
+4. Hensel's lemma for incremental search refinement
+5. Three-phase discovery: word-match → cluster expansion → tree-pruned search
+
+## Architecture
+- Cloudflare Workers (primary compute, 27+ endpoints)
+- Cloudflare R2 (persistent tree + paper storage)
+- Cloudflare Pages (frontend + dendrogram visualization)
+- Cloudflare D1 (paper metadata, clusters, versions)
+- Cloudflare Vectorize (semantic embeddings)
+- Cloudflare Durable Objects & Cron
+
+## Key Endpoints
+- /did-you-mean — 3-phase ultrametric discovery
+- /ultrametric-tree — full tree stats (20 mathematical fields)
+- /dendrogram-json — D3-compatible nested tree (43KB, 451 leaves)
+- /validate — Hasse local-global validation
+- /spectral-analysis — Tate's Thesis + Amice Transform + Intrinsic Amice
+- /bruhat-tits — Bruhat-Tits building (901 vertices)
+- /paper-versions — Witt vector version history
+- /berkovich-explorer — Berkovich space type-1/2 points
+- /perceptron — p-adic neural perceptron (no sigmoid)
+- /spec — OpenAPI 3.1 specification
+
+## 20 Mathematical Principles
+1. Ultrametric Distance, 2. p-adic Valuation, 3. p-adic Absolute Value, 4. Ostrowski's Theorem, 5. Hensel's Lemma, 6. Single-Linkage Clustering, 7. R2 Persistence, 8. Pages Dendrogram, 9. p-adic Caching, 10. D1 Cluster Metadata, 11. p-adic Time Series, 12. Ultrametric Routing, 13. Bruhat-Tits Building, 14. Hasse Local-Global, 15. Witt Vectors, 16. Tate's Thesis, 17. Amice Transform, 18. Mahler's Theorem, 19. Berkovich Spaces, 20. Intrinsic Amice Transform
