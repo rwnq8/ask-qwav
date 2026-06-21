@@ -1,4 +1,16 @@
-// D1 fallback for empty-text contexts using title matching
+/**
+ * @module d1_fallback_v2
+ * @description Second-pass D1 fallback using title-based matching when r2_key lookups
+ *              in d1_fallback.js fail. Tries two strategies sequentially:
+ *              1. LIKE match on truncated citation title (first 60 chars)
+ *              2. LIKE match on LOWER(title) using slug-derived search terms
+ *
+ * @strategy Runs only if emptyContexts still has unresolved entries after v1.
+ *          Each strategy uses .catch(() => null) to fail gracefully per-paper.
+ *          Abstracts capped at 2500 chars on success.
+ *
+ * @integration Runs after d1_fallback.js v1. Operates on the same emptyContexts array.
+ */
 if (emptyContexts.length > 0) {
   try {
     for (let ei = 0; ei < emptyContexts.length; ei++) {

@@ -1,3 +1,20 @@
+/**
+ * @module cite_loop
+ * @description Citation extraction loop — processes Vectorize query matches into
+ *              structured contexts (text + name) and citations (title + slug + url + score).
+ *              Filters out untitled/empty/unknown sources to keep LLM context clean.
+ *              Each context is capped at 2500 chars; names are sanitized of -/.html artifacts.
+ *
+ * @integration Inserted inline into the main query handler after Vectorize similarity search.
+ * @input  vectorMatches — Array from Vectorize query with { metadata: { text, title, slug, url }, score }
+ * @output  contexts[] — Array of { text: string (≤2500), name: string } for LLM prompt prep
+ *          citations[] — Array of { title, slug, url, score (0-1) } for citation tracking
+ *
+ * @filtering
+ *   - Skips matches where title/slug is empty, "Untitled", or "unknown"
+ *   - Skips matches where text content is ≤30 chars (too short to be useful)
+ *   - Sanitizes display names: strips .html, replaces - with spaces
+ */
 for (const match of vectorMatches) {
           const meta = match.metadata || {};
           const text = meta.text || meta.content || "";

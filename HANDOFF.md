@@ -31,9 +31,12 @@ Comprehensive documentation pass on the QWAV Worker (`worker.js`). Added JSDoc t
 | /spec endpoint | ✅ OpenAPI 3.1, 27 paths, 15 tags, x-ai-crawler |
 | 404 endpoint catalog | ✅ 28 entries (was 13) |
 | Deployment verified | ✅ /health → 2.6.0, /spec → valid |
-| Helper modules documented | ⚠️ Not yet (chunk_helper.js, citation_label.js, cite_loop.js, d1_fallback.js, d1_fallback_v2.js, d1_fallback_v3.js, index_endpoint.js, user_prompt_patch.js) |
-| Pages (index.html) SEO | ⚠️ Not addressed this session |
-| Git committed | ❌ Not committed (local only) |
+| Helper modules documented | ✅ All 8 files: chunk_helper.js, citation_label.js, cite_loop.js, d1_fallback.js, d1_fallback_v2.js, d1_fallback_v3.js, index_endpoint.js, user_prompt_patch.js |
+| Pages (index.html) SEO | ✅ OG/Twitter/JSON-LD + llms.txt deployed (fca76ac) |
+| Git committed | ❌ Not committed (local changes: JSDoc on 8 helper modules + FAILURES.md) |
+| Buffer social media | ❌ BLOCKED — Buffer API deprecated PAT auth, requires full OAuth 2.0 (see FAILURES.md) |
+| I-K endpoints | ✅ /validate-selmer, /p-adic-embed, /period-bridge implemented and live |
+| 36 unfixable papers | ⚠️ PENDING — manual R2 triage needed (see FAILURES.md) |
 
 ### Next Steps for Next Agent
 1. **Commit + push**: `git add worker.js HANDOFF.md && git commit -m "docs: add comprehensive JSDoc + OpenAPI /spec endpoint to QWAV worker" && git push`

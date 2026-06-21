@@ -1,3 +1,32 @@
+/**
+ * @module index_endpoint
+ * @description POST /index-papers endpoint — CRON-like manual indexing of papers
+ *              from R2 markdown → AI embeddings (bge-base-en-v1.5) → Vectorize upsert.
+ *              Supports status/start/continue/clear actions with progress persistence
+ *              in D1's _cf_KV key-value store. Processes papers in configurable batches.
+ *
+ * @integration Inserted before the 404 catch-all in worker.js main fetch handler.
+ * @route   POST /index-papers
+ * @input   { action: "status"|"start"|"continue"|"clear", batch_size?: number (≤20) }
+ *
+ * @actions
+ *   status   — Returns { indexed_papers, total_papers, chunks_in_vectorize, last_arxiv_id,
+ *              errors (last 20), complete (bool) } from D1 index_progress + PAPERS_DB
+ *   start    — Begins indexing from arxiv_id ASC. Reads papers from PAPERS_DB, fetches
+ *              markdown from R2, chunks via chunkMarkdown(), embeds via AI binding,
+ *              upserts into VECTORIZE_INDEX. Tracks progress in D1.
+ *   continue — Resumes from last_arxiv_id saved in D1 index_progress
+ *   clear    — Resets index_progress and vectorize_indexed_count in D1
+ *
+ * @pipeline  PAPERS_DB → R2 fetch → chunkMarkdown(2000-char) → AI.run(@cf/baai/bge-base-en-v1.5)
+ *            → VECTORIZE_INDEX.upsert → D1 progress save → D1 batch errors
+ *
+ * @cloudflare
+ *   - AI: @cf/baai/bge-base-en-v1.5 for embedding generation
+ *   - Vectorize: qwav-research index via VECTORIZE_INDEX binding
+ *   - D1: PAP_DB for paper listing, DB (qnfo-audit) for progress persistence
+ *   - R2: PAPERS_R2 (qnfo bucket) for raw markdown content
+ */
 // ─── INDEXING ENDPOINT ───
 // Inserted before the 404 catch-all in worker.js
 

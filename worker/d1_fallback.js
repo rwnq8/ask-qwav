@@ -1,4 +1,17 @@
-// D1 fallback for empty-text contexts — sequential lookups, no nested template literals
+/**
+ * @module d1_fallback
+ * @description D1 fallback for empty-text contexts — when Vectorize returns matches
+ *              with no content body (only metadata), this iterates over empty contexts
+ *              and attempts to load the paper abstract from D1 (living-paper database).
+ *
+ * @strategy Sequential lookups via r2_key → slug matching against PAPERS_DB.abstracts.
+ *           No nested template literals — each lookup uses simple .bind() calls.
+ *           Capped at 2500 chars per abstract to stay within LLM context budget.
+ *
+ * @integration Runs after cite_loop when contexts[] has entries with empty/minimal text.
+ * @input  contexts[] with some entries where .text is empty or <100 chars
+ * @output contexts[ctxIdx].text populated with D1 abstract (≤2500 chars) when found
+ */
 const emptyContexts = [];
 for (let i = 0; i < contexts.length; i++) {
   if (!contexts[i].text || contexts[i].text.length < 100 || contexts[i].text.indexOf("[Full text") === 0) {

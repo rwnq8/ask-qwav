@@ -1,5 +1,18 @@
-// D1 abstract fallback for contexts with empty/minimal text
-// Runs after the citation loop — uses title/substring matching against living-paper D1
+/**
+ * @module d1_fallback_v3
+ * @description Third-pass D1 abstract fallback — runs after the full citation loop
+ *              and v1/v2 fallbacks. Uses title + slug substring matching against
+ *              the living-paper D1 database. Rate-limited to 5 fills max.
+ *
+ * @strategy For each context with empty/<100 char text:
+ *           1. Try title substring LIKE match (first 80 chars)
+ *           2. Fall back to slug-based LOWER(title) LIKE match (first 80 chars)
+ *           3. On hit → populate context with abstract (≤2500 chars)
+ *           Stops after 5 successful fills to avoid D1 overload.
+ *
+ * @integration Final fallback in the chain: cite_loop → d1_fallback → d1_fallback_v2 → d1_fallback_v3
+ * @limit 5 fills max — prevents runaway D1 queries for large result sets
+ */
 {
   let filledCount = 0;
   for (let i = 0; i < contexts.length && filledCount < 5; i++) {
