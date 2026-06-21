@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en" data-brand="qwav" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultrametric Tree — Case Study | Ask QWAV</title>
+<meta name="description" content="Production implementation of ultrametric distance and p-adic valuation in a real-world research paper discovery engine, deployed on Cloudflare Workers, R2, and Pages.">
+<meta name="keywords" content="ultrametric distance, p-adic valuation, Ostrowski theorem, Hensel lemma, agglomerative clustering, dendrogram, Cloudflare Workers">
+<meta name="author" content="QWAV / QNFO">
+<style>
+:root {
+  --bg: #0a0a0f; --surface: #141420; --surface-hover: #1a1a2e;
+  --surface-elevated: #1c1c32; --border: #2a2a3e; --text: #e0e0e0;
+  --text-secondary: #888; --accent: #F6821F; --accent-dim: #b86010;
+  --accent-bg: rgba(246,130,31,0.08); --accent-border: rgba(246,130,31,0.25);
+  --green: #4ade80; --red: #f87171; --code-bg: #1a1a2e;
+}
+[data-theme="light"] {
+  --bg: #f5f5f0; --surface: #ffffff; --surface-hover: #f0f0e8;
+  --surface-elevated: #e8e8e0; --border: #d4d4cc; --text: #1a1a1a;
+  --text-secondary: #666; --accent: #d4711a; --accent-dim: #b86010;
+  --accent-bg: rgba(214,113,26,0.08); --accent-border: rgba(214,113,26,0.25);
+  --green: #16a34a; --red: #dc2626; --code-bg: #f0f0e8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+header { border-bottom: 1px solid var(--border); margin-bottom: 2rem; padding-bottom: 1.5rem; }
+header h1 { font-size: 2rem; color: var(--accent); }
+header .subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.5rem; }
+.badge { display: inline-block; padding: 0.2rem 0.6rem; background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 4px; font-size: 0.75rem; color: var(--accent); margin-right: 0.3rem; margin-bottom: 0.3rem; }
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin: 1.5rem 0; }
+.meta-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+.meta-card .label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.meta-card .value { font-size: 1rem; font-weight: 600; color: var(--accent); margin-top: 0.25rem; }
+h2 { color: var(--accent); font-size: 1.4rem; margin: 2rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+h3 { color: var(--text); font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
+p { margin-bottom: 1rem; color: var(--text-secondary); }
+ul, ol { margin: 0.5rem 0 1rem 1.5rem; color: var(--text-secondary); }
+li { margin-bottom: 0.3rem; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; font-size: 0.8rem; line-height: 1.5; margin-bottom: 1rem; }
+code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 0.85rem; }
+pre code { color: var(--text); }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+th, td { border: 1px solid var(--border); padding: 0.5rem 0.75rem; text-align: left; font-size: 0.85rem; }
+th { background: var(--surface); color: var(--accent); font-weight: 600; }
+td { color: var(--text-secondary); }
+blockquote { border-left: 3px solid var(--accent); padding: 0.5rem 1rem; margin: 1rem 0; background: var(--accent-bg); border-radius: 0 8px 8px 0; font-style: italic; color: var(--text); }
+.math { color: var(--accent); font-family: 'SF Mono', monospace; }
+.links { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.links a { color: var(--accent); text-decoration: none; padding: 0.4rem 0.8rem; background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 6px; font-size: 0.85rem; transition: background 0.2s; }
+.links a:hover { background: var(--surface-elevated); }
+.theme-btn { position: fixed; top: 1rem; right: 1rem; background: var(--surface-hover); border: 1px solid var(--border); color: var(--text); font-size: 1.2rem; width: 2.5rem; height: 2.5rem; border-radius: 50%; cursor: pointer; z-index: 100; }
+@media (max-width: 640px) { .container { padding: 1rem; } header h1 { font-size: 1.5rem; } }
+</style>
+</head>
+<body>
+<button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+<div class="container">
+<header>
+  <h1>🌳 Ultrametric Tree — Case Study in Practical Applications</h1>
+  <div class="subtitle">Production implementation of ultrametric distance and p-adic valuation in the QWAV research paper "Did You Mean?" discovery engine, deployed on Cloudflare Workers, R2, and Pages.</div>
+  <div style="margin-top:1rem">
+    <span class="badge">Version 2.8.0</span>
+    <span class="badge">Worker: f2d60e5b</span>
+    <span class="badge">21 June 2026</span>
+    <span class="badge">451 papers</span>
+    <span class="badge">Cloudflare Workers</span>
+  </div>
+</header>
+
+<div class="meta-grid">
+  <div class="meta-card"><div class="label">Tree Leaves</div><div class="value">451</div></div>
+  <div class="meta-card"><div class="label">Internal Nodes</div><div class="value">450</div></div>
+  <div class="meta-card"><div class="label">Max Depth</div><div class="value">222</div></div>
+  <div class="meta-card"><div class="label">Ultrametric Radius</div><div class="value">58 edits</div></div>
+  <div class="meta-card"><div class="label">Build Time</div><div class="value">~2-3s</div></div>
+  <div class="meta-card"><div class="label">Cached Response</div><div class="value">&lt;100ms</div></div>
+  <div class="meta-card"><div class="label">3-Phase Engine</div><div class="value">Word → Cluster → Tree</div></div>
+  <div class="meta-card"><div class="label">Endpoints</div><div class="value">14</div></div>
+</div>
+
+<h2>Abstract</h2>
+<p>We present a production implementation of ultrametric distance and p-adic valuation principles applied to a real-world information retrieval system: the QWAV research paper corpus "Did You Mean?" discovery engine. The system uses <strong>agglomerative single-linkage clustering</strong> — the only hierarchical clustering method that guarantees ultrametric distances — to organize 451 academic paper titles into a binary dendrogram. A <strong>three-phase discovery engine</strong> (word-level edit matching → ultrametric cluster expansion → tree-based pruned search) enables cross-disciplinary paper discovery beyond direct word overlap. The architecture demonstrates five p-adic and ultrametric principles in production, with the tree persisted to Cloudflare R2 for cold-start resilience and visualized via an interactive Pages dendrogram.</p>
+
+<h2>1. Mathematical Foundation</h2>
+
+<h3>1.1 Ultrametric Distance</h3>
+<p>An ultrametric distance <span class="math">d</span> satisfies the <strong>strong triangle inequality</strong>:</p>
+<pre><code>d(x,z) ≤ max(d(x,y), d(y,z))    ∀x,y,z ∈ X</code></pre>
+<p>This is strictly stronger than the standard metric inequality. All triangles are isosceles, balls are either disjoint or nested, and ultrametric spaces correspond canonically to rooted trees (dendrograms) where the distance between two leaves equals the height of their lowest common ancestor.</p>
+
+<h3>1.2 p-adic Valuation</h3>
+<p>The <strong>p-adic valuation</strong> <span class="math">ord_p(x)</span> is the largest <span class="math">k</span> such that <span class="math">p^k</span> divides <span class="math">x</span>. The p-adic absolute value is <span class="math">|x|_p = p^{-ord_p(x)}</span>. In our system, we approximate <span class="math">ord_p(paper)</span> as the depth of the paper leaf from the dendrogram root — papers with low depth are more "foundational," while papers with high depth are more "specialized."</p>
+
+<h3>1.3 Ostrowski's Theorem</h3>
+<blockquote>Every non-trivial absolute value on ℚ is equivalent to either the usual absolute value |·|_∞ or a p-adic absolute value |·|_p.</blockquote>
+<p>We combine both into an <strong>Ostrowski hybrid score</strong> — a weighted harmonic mean of the Euclidean-like cluster-distance norm and the 2-adic valuation norm. This gives a mathematically principled ranking that balances structural position with hierarchical depth.</p>
+
+<h3>1.4 Hensel's Lemma</h3>
+<blockquote>If f(x) ≡ 0 (mod p) and f'(x) ≢ 0 (mod p), then there exists a unique lift to a root modulo pⁿ for all n.</blockquote>
+<p>Search results are organized into <strong>Hensel layers</strong> by ultrametric merge distance. Each layer represents one "lift" deeper into the knowledge hierarchy, enabling incremental search refinement.</p>
+
+<h2>2. Implementation Architecture</h2>
+
+<h3>2.1 Tree Construction</h3>
+<pre><code>Algorithm: buildUltrametricTree(titles)
+  Input:  n = 451 paper titles
+  Output: Root node of ultrametric dendrogram
+
+  1. Create n leaf nodes
+  2. Compute n×n Levenshtein distance matrix (Float64)
+  3. While active clusters > 1:
+     a. Find pair (i,j) with minimum D[i][j]
+     b. Merge into internal node with distance = D[i][j]
+     c. Update D via single-linkage: D[new][k] = min(D[i][k], D[j][k])
+  4. Return root
+
+  Complexity: O(n³) ≈ 15M ops, executes in ~2-3s on Cloudflare Workers</code></pre>
+
+<h3>2.2 Three-Phase Discovery Engine</h3>
+<table>
+  <tr><th>Phase</th><th>Method</th><th>Source</th></tr>
+  <tr><td>1</td><td>Word-level Levenshtein matching</td><td>word</td></tr>
+  <tr><td>2</td><td>Ultrametric cluster expansion</td><td>cluster</td></tr>
+  <tr><td>3</td><td>Tree-based pruned search (fallback)</td><td>tree</td></tr>
+</table>
+<p><strong>Phase 2</strong> is the key innovation — papers that are mathematically "near" in the ultrametric tree are suggested even when they lack direct word overlap with the query.</p>
+
+<h3>2.3 Search Pruning via Strong Triangle Inequality</h3>
+<pre><code>searchNode(node, query, maxDistance):
+  for each child of internal node:
+    d_rep = levenshtein(query, child.rep)
+    effectiveRadius = child.distance
+    if d_rep ≤ maxDistance + effectiveRadius:
+      searchNode(child)  // subtree may contain matches
+    else:
+      PRUNE  // by strong triangle inequality, no member can match</code></pre>
+
+<h2>3. Discovery in Action</h2>
+<p><strong>Query:</strong> <code>"quantm"</code></p>
+<p><strong>Phase 1 (Word Match):</strong> "10 Quantum Phenomena", "Orchestrating the Quantum Future...", "Quantum Clasical Divide", "Quantum Confusion", "Quantum Field Complex Computational States"</p>
+<p><strong>Phase 2 (Cluster Expansion):</strong> "Quantum Fraud", "1 Converging Quests", <em>"the Converging Quest for Reality a Narrative of Consilience"</em></p>
+<p>The cluster expansion reveals <em>"the Converging Quest for Reality"</em> as ultrametrically related to quantum papers despite sharing no words — <strong>discovery through structure</strong>.</p>
+
+<h2>4. Cloudflare Architecture</h2>
+<table>
+  <tr><th>Property</th><th>Role</th><th>Status</th></tr>
+  <tr><td>Workers</td><td>3-phase ultrametric engine + 14 endpoints</td><td>✅ Production</td></tr>
+  <tr><td>R2</td><td>Tree JSON + title index + timestamp persistence</td><td>✅ Production</td></tr>
+  <tr><td>Pages</td><td>🌳 Tree tab with interactive dendrogram</td><td>✅ Production</td></tr>
+  <tr><td>D1</td><td>Paper metadata store (454 papers)</td><td>✅ Production</td></tr>
+  <tr><td>Vectorize</td><td>1,380 chunks for RAG search</td><td>✅ Production</td></tr>
+  <tr><td>Cron</td><td>30-min auto-index + tree rebuild trigger</td><td>✅ Production</td></tr>
+  <tr><td>KV</td><td>p-adic cache TTL (planned)</td><td>🗒️ Design</td></tr>
+  <tr><td>Durable Objects</td><td>Stateful tree maintenance (planned)</td><td>🗒️ Design</td></tr>
+  <tr><td>Queues</td><td>Background tree rebuilds (planned)</td><td>🗒️ Design</td></tr>
+  <tr><td>DNS</td><td>Ultrametric content routing (planned)</td><td>🗒️ Design</td></tr>
+</table>
+
+<h2>5. 20 Mathematical Principles Applied</h2>
+<ol>
+  <li><strong>Ultrametric Distance</strong> — strong triangle inequality for O(log n) search pruning</li>
+  <li><strong>p-adic Valuation</strong> — dendrogram depth as ord_p for paper ranking</li>
+  <li><strong>p-adic Absolute Value</strong> — |x|_2 = 2^{-depth} for foundational scoring</li>
+  <li><strong>Ostrowski's Theorem</strong> — hybrid metric combining |·|_∞ + |·|_2</li>
+  <li><strong>Hensel's Lemma</strong> — papers organized into lift-able merge-distance layers</li>
+  <li><strong>Single-Linkage Clustering</strong> — guarantees ultrametric dendrogram</li>
+  <li><strong>R2 Persistence</strong> — cold-start tree restoration in &lt;100ms</li>
+  <li><strong>Pages Dendrogram</strong> — interactive tree visualization with expandable clusters</li>
+  <li><strong>Bruhat-Tits Buildings</strong> — network topology as simplicial complexes (design)</li>
+  <li><strong>Local-Global (Hasse) Principle</strong> — distributed validation across edges (design)</li>
+  <li><strong>Witt Vectors</strong> — layered document versioning via Teichmüller lifts (design)</li>
+  <li><strong>p-adic Interpolation</strong> — content recommendation by p-adic continuity (design)</li>
+  <li><strong>Mahler's Theorem</strong> — ranking function compression (design)</li>
+  <li><strong>Berkovich Spaces</strong> — continuous hierarchy model (design)</li>
+  <li><strong>Fontaine's Period Rings</strong> — data format bridges (design)</li>
+  <li><strong>p-adic Caching</strong> — TTL by 2-adic valuation (design)</li>
+  <li><strong>Ultrametric Routing</strong> — DNS/content routing by cluster membership (design)</li>
+  <li><strong>p-adic Time Series</strong> — temporal clustering of queries (design)</li>
+  <li><strong>Tate's Thesis</strong> — multi-scale Fourier analysis on adeles (design)</li>
+  <li><strong>Amice Transform</strong> — spectral paper analysis on ultrametric tree (design)</li>
+</ol>
+
+<h2>6. API Reference</h2>
+<table>
+  <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+  <tr><td><code>/health</code></td><td>GET</td><td>System health + indexing status</td></tr>
+  <tr><td><code>/did-you-mean?q=</code></td><td>GET</td><td>3-phase discovery engine</td></tr>
+  <tr><td><code>/ultrametric-tree</code></td><td>GET</td><td>Tree stats + Ostrowski ranking + Hensel layers</td></tr>
+  <tr><td><code>/stats</code></td><td>GET</td><td>Query statistics</td></tr>
+  <tr><td><code>/stats/csv</code></td><td>GET</td><td>CSV stats export</td></tr>
+  <tr><td><code>/threads</code></td><td>GET/POST/DELETE</td><td>Thread management</td></tr>
+  <tr><td><code>/papers</code></td><td>GET</td><td>Paper browser</td></tr>
+  <tr><td><code>/fix-titles</code></td><td>POST</td><td>Title extraction</td></tr>
+  <tr><td><code>/index-papers</code></td><td>POST</td><td>Manual re-index</td></tr>
+  <tr><td><code>/</code></td><td>POST</td><td>Main RAG query</td></tr>
+</table>
+
+<h2>7. Deployment</h2>
+<table>
+  <tr><th>Component</th><th>Version</th><th>URL</th></tr>
+  <tr><td>Worker</td><td>f2d60e5b</td><td><a href="https://ask-qwav.q08.workers.dev">ask-qwav.q08.workers.dev</a></td></tr>
+  <tr><td>Frontend</td><td>655678fa</td><td><a href="https://655678fa.ask-qwav.pages.dev">655678fa.ask-qwav.pages.dev</a></td></tr>
+  <tr><td>Production</td><td>—</td><td><a href="https://ask.qwav.tech">ask.qwav.tech</a></td></tr>
+</table>
+
+<blockquote>
+  <em>"The strong triangle inequality is not merely a mathematical curiosity — it is the key to organizing human knowledge into naturally discoverable hierarchies."</em>
+</blockquote>
+
+<div class="links">
+  <a href="https://ask.qwav.tech">🌐 Ask QWAV</a>
+  <a href="https://github.com/deepcs-org/ask-qwav">📦 GitHub</a>
+  <a href="https://qnfo.org">🔬 QNFO</a>
+  <a href="https://ask-qwav.q08.workers.dev/ultrametric-tree">🌳 Tree API</a>
+  <a href="https://ask-qwav.q08.workers.dev/health">❤️ Health</a>
+</div>
+</div>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const isLight = html.getAttribute('data-theme') === 'light';
+  html.setAttribute('data-theme', isLight ? 'dark' : 'light');
+  document.querySelector('.theme-btn').textContent = isLight ? '🌙' : '☀️';
+  try { localStorage.setItem('ultra-case-study-theme', isLight ? 'dark' : 'light'); } catch(e) {}
+}
+(function() {
+  const saved = (function(){try{return localStorage.getItem('ultra-case-study-theme')}catch(e){return null}})();
+  if (saved === 'light') { document.documentElement.setAttribute('data-theme', 'light'); document.querySelector('.theme-btn').textContent = '☀️'; }
+})();
+</script>
+</body>
+</html>

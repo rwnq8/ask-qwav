@@ -1,0 +1,30 @@
+name = "ask-qwav"
+main = "worker.js"
+compatibility_date = "2025-06-20"
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "qnfo-audit"
+database_id = "35e2e573-92f3-46ac-83c6-22f6429fc5e5"
+
+[[d1_databases]]
+binding = "PAPERS_DB"
+database_name = "living-paper"
+database_id = "70a58cb3-b2cd-498d-877f-ecca86859a22"
+
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "qwav-research"
+
+[[r2_buckets]]
+binding = "PAPERS_R2"
+bucket_name = "qnfo"
+
+[ai]
+binding = "AI"
+
+[triggers]
+crons = ["*/30 * * * *"]

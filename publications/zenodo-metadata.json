@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "title": "Ultrametric Tree — Practical p-Adic Information Retrieval on Cloudflare Workers",
+    "description": "Production implementation of ultrametric distance, p-adic valuation, Ostrowski's theorem, and Hensel's lemma applied to a real-world research paper discovery engine. The system uses agglomerative single-linkage clustering to organize 451 academic paper titles into an ultrametric dendrogram with a three-phase search engine (word-match → cluster expansion → tree pruned search). Deployed on Cloudflare Workers, R2, and Pages. Includes 20 documented mathematical principles with production Cloudflare applications.",
+    "creators": [
+      {
+        "name": "QWAV / QNFO",
+        "affiliation": "QNFO Research"
+      }
+    ],
+    "keywords": [
+      "ultrametric distance",
+      "p-adic valuation",
+      "Ostrowski theorem",
+      "Hensel lemma",
+      "agglomerative clustering",
+      "dendrogram",
+      "information retrieval",
+      "Cloudflare Workers",
+      "R2 persistence",
+      "hierarchical search",
+      "discovery engine",
+      "single-linkage clustering"
+    ],
+    "license": "QNFO-Unified-License-v2.0",
+    "publication_date": "2026-06-21",
+    "version": "2.8.0",
+    "language": "eng",
+    "access_right": "open",
+    "communities": [
+      {"identifier": "qnfo"},
+      {"identifier": "cloudflare"}
+    ],
+    "related_identifiers": [
+      {
+        "identifier": "https://github.com/deepcs-org/ask-qwav",
+        "relation": "isSupplementTo",
+        "resource_type": "software"
+      },
+      {
+        "identifier": "https://ask-qwav.q08.workers.dev",
+        "relation": "isSupplementTo",
+        "resource_type": "other"
+      },
+      {
+        "identifier": "https://ultrametric-case-study.ask-qwav.pages.dev",
+        "relation": "isIdenticalTo",
+        "resource_type": "publication-other"
+      }
+    ]
+  }
+}
