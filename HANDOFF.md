@@ -2,6 +2,7 @@
 
 ## Session: 2026-06-21 — Code Documentation + Discoverability Metadata
 **Closeout Audit:** 2026-06-21 — DeepChat session MaRy1YP6ny7QFsK2QQsbY
+**Final Closeout:** 2026-06-21 — Zenodo prep, I-K verification, unfixable papers tracker
 
 ### Agent
 Claude (DeepChat) — deepseek-v4-pro
@@ -35,9 +36,10 @@ Comprehensive documentation pass on the QWAV Worker (`worker.js`). Added JSDoc t
 | Health version bump | ✅ Now reports 2.7.0 (commit 8dd2d4e) |
 | Git committed + pushed | ✅ All changes committed (commits 44173cb, d0bbd6f, fca76ac, 8dd2d4e) |
 | I-K endpoints | ✅ /validate-selmer, /p-adic-embed, /period-bridge live |
+| I-K research handoff | ✅ Updated with live verification status (publications/research-handoff.md) |
 | Buffer social media | ❌ BLOCKED — Buffer API deprecated PAT auth, requires full OAuth 2.0 (see FAILURES.md) |
-| 36 unfixable papers | ⚠️ PENDING — manual R2 triage needed (see FAILURES.md) |
-| Zenodo Upload | ⚠️ MANUAL — see publications/zenodo-metadata.json |
+| 36 unfixable papers | ⚠️ PENDING — tracker created at publications/unfixable-papers-tracker.md |
+| Zenodo Upload | ⚠️ MANUAL — README at publications/README-ZENODO.md, metadata at publications/zenodo-metadata.json |
 
 ### Git History (latest commits)
 ```
@@ -49,9 +51,9 @@ fca76ac seo: add OG/Twitter/JSON-LD meta tags + llms.txt for Pages
 ```
 
 ### Remaining Tasks
-1. **Buffer OAuth 2.0 rewrite** — BLOCKED: Buffer deprecated PAT auth. Needs full OAuth flow.
-2. **36 unfixable papers** — MANUAL: requires human triage of R2 content.
-3. **Zenodo upload** — MANUAL: upload case study to Zenodo.
+1. **Zenodo upload** — MANUAL: follow `publications/README-ZENODO.md` to upload case study to Zenodo.
+2. **36 unfixable papers** — MANUAL: triage using `publications/unfixable-papers-tracker.md` as guide. Requires R2 access + original paper sources.
+3. **Buffer OAuth 2.0 rewrite** — BLOCKED: Buffer deprecated PAT auth. Needs full OAuth 2.0 app registration at buffer.com/developers/apps.
 
 ### Blockers / Dependencies
 - Buffer: Needs OAuth 2.0 app registration at buffer.com/developers/apps

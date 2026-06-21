@@ -1,11 +1,11 @@
 # QWAV Ultrametric Research — Handoff for Options I-K
 
-## Session State (as of 2026-06-21)
+## Session State (as of 2026-06-21 — CLOSEOUT)
 
 ### Deployed Infrastructure
 | Component | Version | URL |
 |-----------|---------|-----|
-| Worker | `f57f83f4` → deploying | `ask-qwav.q08.workers.dev` |
+| Worker | `7e1d7271` (v2.7.0) | `ask-qwav.q08.workers.dev` |
 | Frontend | `655678fa` | `655678fa.ask-qwav.pages.dev` |
 | Case Study | `9b7eaf2c` | `ultrametric-case-study.ask-qwav.pages.dev` |
 | GitHub | `rwnq8/ask-qwav` | `github.com/rwnq8/ask-qwav` |
@@ -19,6 +19,13 @@
 
 A-D: Perceptron, Dendrogram, Email Digest template, Heatmap
 E-H: Vectorize Index, Multi-Edge Hasse, Witt Diff, Berkovich Explorer
+
+### I-K Endpoints — Live Verification (2026-06-21)
+| Endpoint | Status | Verification |
+|----------|--------|-------------|
+| **I** `/validate-selmer` | ✅ LIVE | Tate-Shafarevich group validation with multi-edge consensus check via `levenshteinSearch()` |
+| **J** `/p-adic-embed` | ✅ LIVE | p-adic token embeddings with binary attention masks via ultrametric ball membership |
+| **K** `/period-bridge` | ✅ LIVE | Fontaine period bridge with 6-directional transformations (B_cris, B_st, B_dR) |
 
 ---
 
