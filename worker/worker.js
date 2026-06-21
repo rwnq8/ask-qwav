@@ -781,7 +781,46 @@ export default {
       try {
         const c = await env.DB.prepare("SELECT COUNT(*) as total, COALESCE(AVG(elapsed_ms),0) as avg_ms, COALESCE(SUM(citations_count),0) as total_cit FROM ask_queries_v2").first();
         const threads = await env.DB.prepare("SELECT COUNT(*) as total FROM chat_sessions").first();
-        return new Response(JSON.stringify({ total_queries: c.total, avg_latency_ms: Math.round(c.avg_ms), total_citations: c.total_cit, total_threads: threads.total }), { headers: hdrs });
+        
+        // ─── p-adic Time Series Clustering ───
+        // Two timestamps are p-adically close if ord_p(|t1-t2|) is large
+        // ord_2(diff) = number of trailing zeros in binary = log2 of largest power-of-2 divisor
+        // Query recency buckets by 2-adic valuation:
+        //   ord2 ≥ 10: within ~17 min (2^10 = 1024 seconds)
+        //   ord2 ≥ 5:  within ~32 seconds
+        //   ord2 ≥ 0:  within ~1 second
+        const now = Date.now();
+        const recentRows = await env.DB.prepare(
+          "SELECT timestamp FROM ask_queries_v2 ORDER BY id DESC LIMIT 1000"
+        ).all();
+        let ord2ge10 = 0, ord2ge5 = 0, ord2ge0 = 0, totalClassified = 0;
+        for (const row of (recentRows.results || [])) {
+          totalClassified++;
+          const ts = new Date(row.timestamp).getTime();
+          const diffMs = Math.abs(now - ts);
+          if (diffMs === 0) { ord2ge0++; ord2ge5++; ord2ge10++; continue; }
+          // Count trailing zeros in binary diffMs → ord_2(diffMs)
+          let ord2 = 0, d = diffMs;
+          while (d % 2 === 0 && d > 0) { ord2++; d /= 2; }
+          if (ord2 >= 10) ord2ge10++;
+          if (ord2 >= 5) ord2ge5++;
+          if (ord2 >= 0) ord2ge0++;
+        }
+        
+        return new Response(JSON.stringify({
+          total_queries: c.total, avg_latency_ms: Math.round(c.avg_ms),
+          total_citations: c.total_cit, total_threads: threads.total,
+          pAdicTimeClusters: {
+            total_queries_classified: totalClassified,
+            prime: 2,
+            clusters: [
+              { ord2label: "ord₂ ≥ 10  (≤17 min)", count: ord2ge10, window_seconds: 1024 },
+              { ord2label: "ord₂ ≥ 5   (≤32 sec)", count: ord2ge5, window_seconds: 32 },
+              { ord2label: "ord₂ ≥ 0   (≤1 sec)",  count: ord2ge0, window_seconds: 1 }
+            ],
+            note: "Higher ord₂ = closer in 2-adic time. |t1-t2|_2 = 2^{-ord_2}"
+          }
+        }), { headers: hdrs });
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
