@@ -411,22 +411,48 @@ let didYouMeanCacheTs = 0;
 
 // ─── Query cache (in-memory, TTL 5min, max 200 entries) ───
 const queryCache = new Map();
-const CACHE_TTL_MS = 300000;
+const CACHE_TTL_MS = 300000;    // fallback TTL (used when tree not available)
 const MAX_CACHE_SIZE = 200;
+
+// p-adic cache TTL: queries closer to ultrametric tree root (more foundational)
+// get longer TTLs. ord_2(query) ≈ depth-inverse → TTL = base * 2^{ord_2}
+// This mirrors the p-adic norm: |x|_2 = 2^{-ord_2(x)} → smaller norm = longer lived
+function getPAdicCacheTTL(query) {
+  if (!ultrametricTree) return CACHE_TTL_MS;
+  const words = query.toLowerCase().trim().split(/\s+/).filter(w => w.length >= 3);
+  if (words.length === 0) return CACHE_TTL_MS;
+  // Estimate valuation: find minimum depth at which a cluster rep matches any query word
+  let bestDepth = 222;
+  function searchDepth(node, depth) {
+    if (node.type === 'leaf') { bestDepth = Math.min(bestDepth, depth); return; }
+    for (const word of words) {
+      const d = levenshtein(word, node.rep.toLowerCase());
+      if (d <= 5 && depth < bestDepth) bestDepth = depth;
+    }
+    if (node.children) { searchDepth(node.children[0], depth + 1); searchDepth(node.children[1], depth + 1); }
+  }
+  searchDepth(ultrametricTree, 0);
+  // ord_2 ≈ (maxDepth - bestDepth) / 10 → 0-22 range, cap at 6 for TTL multiplier
+  const ord2 = Math.min(6, Math.max(0, Math.floor((222 - bestDepth) / 15)));
+  const ttl = 15000 * Math.pow(2, ord2); // 15s → 30s → 60s → 120s → 240s → 480s → 960s
+  return Math.min(600000, ttl);
+}
 
 function getCachedQuery(key) {
   const entry = queryCache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL_MS) { queryCache.delete(key); return null; }
+  const ttl = entry.ttl || CACHE_TTL_MS;
+  if (Date.now() - entry.ts > ttl) { queryCache.delete(key); return null; }
   return entry.data;
 }
 
-function setCachedQuery(key, data) {
+function setCachedQuery(key, data, query = null) {
   if (queryCache.size >= MAX_CACHE_SIZE) {
     const firstKey = queryCache.keys().next().value;
     queryCache.delete(firstKey);
   }
-  queryCache.set(key, { data, ts: Date.now() });
+  const ttl = query ? getPAdicCacheTTL(query) : CACHE_TTL_MS;
+  queryCache.set(key, { data, ts: Date.now(), ttl });
 }
 
 // ─── Rate limiter (in-memory, per-IP, 10 req/min on /index-papers) ───
@@ -756,6 +782,42 @@ export default {
         const c = await env.DB.prepare("SELECT COUNT(*) as total, COALESCE(AVG(elapsed_ms),0) as avg_ms, COALESCE(SUM(citations_count),0) as total_cit FROM ask_queries_v2").first();
         const threads = await env.DB.prepare("SELECT COUNT(*) as total FROM chat_sessions").first();
         return new Response(JSON.stringify({ total_queries: c.total, avg_latency_ms: Math.round(c.avg_ms), total_citations: c.total_cit, total_threads: threads.total }), { headers: hdrs });
+      } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
+    }
+
+    // ─── D1 Cluster metadata: store paper→cluster mapping ───
+    if (request.method === "POST" && url.pathname === "/sync-clusters") {
+      try {
+        if (!ultrametricTree) return new Response(JSON.stringify({ error: "tree not built" }), { status: 503, headers: hdrs });
+        // Create table if not exists
+        await env.PAPERS_DB.prepare(
+          "CREATE TABLE IF NOT EXISTS paper_clusters (arxiv_id TEXT PRIMARY KEY, cluster_depth INTEGER, ostrowski_score REAL, cluster_rep TEXT)"
+        ).run();
+        // Walk tree and collect leaf→cluster assignments
+        const assignments = [];
+        const repMap = new Map();
+        function walkAssign(node, rep, depth) {
+          if (node.type === "leaf") {
+            assignments.push({ arxiv_id: node.title, depth, rep });
+            return;
+          }
+          const newRep = node.rep || rep;
+          walkAssign(node.children[0], newRep, depth + 1);
+          walkAssign(node.children[1], newRep, depth + 1);
+        }
+        walkAssign(ultrametricTree, ultrametricTree.rep, 0);
+        // Batch insert (D1 supports up to 100 bound params per statement)
+        const stmt = await env.PAPERS_DB.prepare(
+          "INSERT OR REPLACE INTO paper_clusters (arxiv_id, cluster_depth, ostrowski_score, cluster_rep) VALUES (?, ?, ?, ?)"
+        );
+        const batch = [];
+        for (const a of assignments) {
+          const score = Math.pow(2, -a.depth) * (1 / (a.depth + 1)); // Ostrowski hybrid
+          batch.push(stmt.bind(a.arxiv_id, a.depth, Math.round(score * 10000) / 10000, a.rep));
+          if (batch.length >= 25) { await env.PAPERS_DB.batch(batch); batch.length = 0; }
+        }
+        if (batch.length > 0) await env.PAPERS_DB.batch(batch);
+        return new Response(JSON.stringify({ synced: assignments.length, message: "Cluster metadata synced to D1" }), { headers: hdrs });
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
     }
 
