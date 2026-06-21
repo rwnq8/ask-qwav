@@ -178,6 +178,25 @@ function levenshtein(a, b) {
   return matrix[alen][blen];
 }
 
+/**
+ * Search the ultrametric title index for titles within a given Levenshtein
+ * distance of the query. Used by validate-selmer for multi-edge consensus checks.
+ * @param {string} query - Title to search for
+ * @param {number} maxDist - Maximum Levenshtein distance (default 1)
+ * @param {number} maxResults - Maximum results to return (default 5)
+ * @returns {string[]} Array of matching titles (lowercased)
+ */
+function levenshteinSearch(query, maxDist = 1, maxResults = 5) {
+  const q = query.toLowerCase();
+  const results = [];
+  for (const [title, node] of ultrametricTitleIndex) {
+    const dist = levenshtein(q, title);
+    if (dist <= maxDist) results.push(title);
+    if (results.length >= maxResults) break;
+  }
+  return results;
+}
+
 // ============================================================
 // ULTRAMETRIC TREE — "Did You Mean?" discovery engine v2.7+
 // ============================================================
