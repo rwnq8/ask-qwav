@@ -738,7 +738,7 @@ export default {
         return new Response(JSON.stringify({
           status: "ok",
           model: "@cf/meta/llama-3.2-3b-instruct",
-          version: "2.6.0",
+          version: "2.7.0",
           features: ["rag", "vectorize", "threads", "analytics", "anti-hallucination", "indexing", "cache", "rate-limit", "cron"],
           paper_count: paperCount.cnt,
           indexed_papers: idxProgress ? idxProgress.indexed : 0,
@@ -1437,7 +1437,7 @@ export default {
           "avg_latency_ms," + Math.round(c.avg_ms),
           "total_citations," + c.total_cit,
           "total_threads," + threads.total,
-          "worker_version,2.6.0"
+          "worker_version,2.7.0"
         ].join("\n");
         return new Response(csv, { headers: { ...hdrs, "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=ask-qwav-stats.csv" } });
       } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: hdrs }); }
